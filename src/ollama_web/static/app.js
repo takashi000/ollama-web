@@ -12,6 +12,9 @@ const fileInput = document.getElementById("file-input");
 const attachmentsEl = document.getElementById("attachments");
 const sessionListEl = document.getElementById("session-list");
 const newSessionBtn = document.getElementById("new-session-btn");
+const menuBtn = document.getElementById("menu-btn");
+const sidebar = document.getElementById("sidebar");
+const sidebarBackdrop = document.getElementById("sidebar-backdrop");
 
 let currentSessionId = null;
 let currentSession = null;
@@ -297,6 +300,24 @@ fileInput.addEventListener("change", () => {
 });
 
 newSessionBtn.addEventListener("click", createSession);
+
+menuBtn.addEventListener("click", () => {
+  sidebar.classList.add("open");
+  sidebarBackdrop.classList.add("active");
+});
+
+sidebarBackdrop.addEventListener("click", () => {
+  sidebar.classList.remove("open");
+  sidebarBackdrop.classList.remove("active");
+});
+
+sessionListEl.addEventListener("click", (e) => {
+  const li = e.target.closest("li");
+  if (li && li.dataset.id && !e.target.closest(".delete")) {
+    sidebar.classList.remove("open");
+    sidebarBackdrop.classList.remove("active");
+  }
+});
 
 async function send() {
   const text = inputEl.value.trim();

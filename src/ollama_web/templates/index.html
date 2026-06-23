@@ -17,9 +17,11 @@
     </div>
     <ul id="session-list"></ul>
   </aside>
+  <div id="sidebar-backdrop"></div>
 
   <div id="main">
     <header>
+      <button id="menu-btn" type="button" aria-label="セッション一覧">☰</button>
       <h1>ollama-web</h1>
       <div class="controls">
         <label for="model-select">モデル:</label>
@@ -35,7 +37,7 @@
         <label class="think-toggle">
           <input type="checkbox" id="think-toggle" /> thinking
         </label>
-        <button id="clear-btn" type="button">会話クリア</button>
+        <button id="clear-btn" type="button">クリア</button>
       </div>
     </header>
 
