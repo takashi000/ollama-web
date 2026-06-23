@@ -8,7 +8,7 @@ from typing import Any
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
-from ..sessions import SessionStore
+from ..sessions import SessionStore, _IMAGE_MIMES, _IMAGE_SUFFIXES
 from ..tools.pdf import extract_pdf_text
 
 logger = logging.getLogger("ollama_web.sessions")
@@ -16,6 +16,17 @@ logger = logging.getLogger("ollama_web.sessions")
 
 def _get_store(request: Request) -> SessionStore:
     return request.app.state.session_store
+
+
+def _is_image_file(name: str, mime: str) -> bool:
+    mime_lower = mime.lower()
+    name_lower = name.lower()
+    if mime_lower in _IMAGE_MIMES:
+        return True
+    for suffix in _IMAGE_SUFFIXES:
+        if name_lower.endswith(suffix):
+            return True
+    return False
 
 
 async def list_sessions(request: Request) -> JSONResponse:
@@ -85,7 +96,10 @@ async def upload_file(request: Request) -> JSONResponse:
         name = getattr(upload, "filename", "uploaded-file") or "uploaded-file"
         content_type = getattr(upload, "content_type", None) or "application/octet-stream"
         text = ""
-        if content_type == "application/pdf" or name.lower().endswith(".pdf"):
+        if _is_image_file(name, content_type):
+            # Images are passed to ollama via Message.images (base64), not as text.
+            text = ""
+        elif content_type == "application/pdf" or name.lower().endswith(".pdf"):
             text = extract_pdf_text(data)
         else:
             # Try decode as text for text-like uploads.

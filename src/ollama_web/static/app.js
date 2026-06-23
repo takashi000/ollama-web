@@ -107,19 +107,27 @@ function addThinkingBubble(parentExtras) {
 
 function parseSseEvent(chunk) {
   const events = [];
-  const rawEvents = chunk.split("\n\n");
-  for (const raw of rawEvents) {
-    const lines = raw.split("\n");
-    const dataLines = [];
-    for (const line of lines) {
-      if (line.startsWith("data: ")) {
-        dataLines.push(line.slice(6));
-      }
-    }
-    if (dataLines.length) {
-      events.push(dataLines.join(""));
+  const lines = chunk.split("\n");
+  let dataBuffer = "";
+
+  function flush() {
+    if (dataBuffer !== "") {
+      events.push(dataBuffer);
+      dataBuffer = "";
     }
   }
+
+  for (const line of lines) {
+    if (line === "") {
+      flush();
+    } else if (line.startsWith("data: ")) {
+      const payload = line.slice(6);
+      dataBuffer = dataBuffer === "" ? payload : dataBuffer + "\n" + payload;
+    }
+    // Lines starting with ':' are comments (e.g. keepalive). All other field
+    // lines are ignored because we only care about 'data:' payloads.
+  }
+  flush();
   return events;
 }
 
@@ -211,6 +219,32 @@ async function selectSession(id) {
   }
 }
 
+function escapeHtml(text) {
+  return text
+    .replace(/&/g, String.fromCharCode(38, 97, 109, 112, 59))
+    .replace(/</g, String.fromCharCode(38, 108, 116, 59))
+    .replace(/>/g, String.fromCharCode(38, 103, 116, 59))
+    .replace(/"/g, String.fromCharCode(38, 113, 117, 111, 116, 59))
+    .replace(/'/g, "&#039;");
+}
+
+function _renderAssistantContent(body, content) {
+  if (content && content.startsWith("[ERROR]")) {
+    const lines = content.slice(7).split("\n").filter((l) => l.trim());
+    body.innerHTML = "";
+    for (const line of lines) {
+      const span = document.createElement("span");
+      span.style.color = "#f85149";
+      span.textContent = line;
+      body.appendChild(span);
+      body.appendChild(document.createElement("br"));
+    }
+  } else {
+    body.innerHTML = renderMarkdown(content);
+    highlightIn(body);
+  }
+}
+
 function renderSession() {
   chatEl.innerHTML = "";
   if (!currentSession) return;
@@ -218,7 +252,8 @@ function renderSession() {
   for (const m of msgs) {
     if (m.role === "user") {
       const body = addMessage("user").body;
-      body.innerHTML = renderMarkdown(m.content);
+      const content = m.content || "";
+      body.innerHTML = renderMarkdown(content);
       highlightIn(body);
       if (m.attachments && m.attachments.length) {
         const info = document.createElement("div");
@@ -236,8 +271,7 @@ function renderSession() {
       }
     } else if (m.role === "assistant") {
       const body = addMessage("assistant").body;
-      body.innerHTML = renderMarkdown(m.content);
-      highlightIn(body);
+      _renderAssistantContent(body, m.content);
     }
   }
 }
@@ -353,6 +387,7 @@ async function send() {
   let assistantText = "";
   let thinkingBody = null;
   const pendingTools = [];
+  let gotError = false;
 
   const model = modelSelect.value;
   const think = thinkToggle.checked;
@@ -412,7 +447,7 @@ async function send() {
     if (done) break;
     buffer += decoder.decode(value, { stream: true });
 
-    const endIndex = buffer.lastIndexOf("\\n\\n");
+    const endIndex = buffer.lastIndexOf("\n\n");
     if (endIndex === -1) continue;
     const chunk = buffer.slice(0, endIndex);
     buffer = buffer.slice(endIndex + 2);
@@ -444,7 +479,12 @@ async function send() {
       } else if (ev.type === "delta") {
         appendDelta(ev.content);
       } else if (ev.type === "error") {
-        assistantBody.innerHTML += `<span style="color:#f85149">エラー: ${ev.message}</span>`;
+        gotError = true;
+        if (!placeholderCleared) {
+          assistantBody.innerHTML = "";
+          placeholderCleared = true;
+        }
+        assistantBody.innerHTML += `<span style="color:#f85149">エラー: ${escapeHtml(ev.message)}</span>`;
       } else if (ev.type === "done") {
         break;
       }
@@ -470,7 +510,7 @@ async function send() {
     }
   }
 
-  if (!assistantText && !pendingTools.length && !thinkingBody) {
+  if (!assistantText && !pendingTools.length && !thinkingBody && !gotError) {
     assistantBody.textContent = "（応答なし）";
   }
 
@@ -479,7 +519,18 @@ async function send() {
   sendBtn.disabled = false;
   inputEl.focus();
 
+  // Preserve any error message that was rendered during the stream so it is
+  // not lost when renderSession() rebuilds the chat pane.
+  const errorHtml = gotError ? assistantBody.innerHTML : null;
+
   await selectSession(currentSessionId);
+
+  if (errorHtml && chatEl.lastElementChild) {
+    const lastBody = chatEl.lastElementChild.querySelector(".body");
+    if (lastBody && lastBody.textContent.trim() === "（応答なし）") {
+      lastBody.innerHTML = errorHtml;
+    }
+  }
 }
 
 formEl.addEventListener("submit", (e) => {

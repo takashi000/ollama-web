@@ -17,6 +17,20 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+_IMAGE_MIMES: set[str] = {
+    "image/png",
+    "image/jpeg",
+    "image/gif",
+    "image/bmp",
+    "image/webp",
+    "image/tiff",
+    "image/x-png",
+    "image/jpg",
+}
+
+_IMAGE_SUFFIXES: set[str] = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".tif", ".tiff"}
+
+
 @dataclass
 class ChatFile:
     id: str
@@ -49,6 +63,16 @@ class ChatFile:
             text=data.get("text", ""),
             source=data.get("source", "upload"),
         )
+
+    @property
+    def is_image(self) -> bool:
+        name_lower = self.name.lower()
+        if self.mime.lower() in _IMAGE_MIMES:
+            return True
+        for suffix in _IMAGE_SUFFIXES:
+            if name_lower.endswith(suffix):
+                return True
+        return False
 
 
 @dataclass
@@ -246,3 +270,14 @@ class SessionStore:
             if f["id"] == file_id:
                 return ChatFile.from_dict(f)
         return None
+
+    def get_file_data(self, session_id: str, file_id: str) -> bytes | None:
+        chat_file = self.get_file(session_id, file_id)
+        if chat_file is None:
+            return None
+        abs_path = self.data_dir / chat_file.path
+        try:
+            return abs_path.read_bytes()
+        except Exception:  # noqa: BLE001
+            return None
+
