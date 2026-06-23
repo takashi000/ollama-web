@@ -9,6 +9,7 @@
   --assistant-bg: #161b22;
   --tool-bg: #2d1117;
   --think-bg: #1a2332;
+  --danger: #f85149;
 }
 
 * { box-sizing: border-box; }
@@ -24,8 +25,112 @@ html, body {
 
 body {
   display: flex;
-  flex-direction: column;
   height: 100vh;
+  overflow: hidden;
+}
+
+#sidebar {
+  width: 260px;
+  min-width: 260px;
+  background: var(--panel);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+}
+
+.sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.sidebar-header h2 {
+  font-size: 15px;
+  margin: 0;
+  color: var(--muted);
+}
+
+.sidebar-header button {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+  padding: 2px 8px;
+}
+
+.sidebar-header button:hover {
+  border-color: var(--accent);
+}
+
+#session-list {
+  list-style: none;
+  margin: 0;
+  padding: 8px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+#session-list li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  margin-bottom: 4px;
+}
+
+#session-list li:hover {
+  background: #21262d;
+}
+
+#session-list li.active {
+  background: #1f6feb33;
+  border: 1px solid var(--accent);
+}
+
+#session-list li .title {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 14px;
+}
+
+#session-list li .delete {
+  display: none;
+  background: transparent;
+  border: none;
+  color: var(--danger);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 2px 4px;
+}
+
+#session-list li:hover .delete {
+  display: inline;
+}
+
+#session-list li.empty {
+  color: var(--muted);
+  font-size: 13px;
+  cursor: default;
+}
+
+#session-list li.empty:hover {
+  background: transparent;
+}
+
+#main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
 }
 
 header {
@@ -134,12 +239,65 @@ main#chat {
   background: var(--think-bg);
 }
 
-form#input-form {
+#attachments {
   display: flex;
-  gap: 8px;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 6px 16px 0;
+  background: var(--panel);
+  border-top: 1px solid var(--border);
+  min-height: 0;
+}
+
+#attachments:empty {
+  display: none;
+}
+
+.attachment-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 13px;
+}
+
+.attachment-chip .remove {
+  cursor: pointer;
+  color: var(--danger);
+  font-weight: 600;
+}
+
+form#input-form {
   padding: 12px 16px;
   background: var(--panel);
   border-top: 1px solid var(--border);
+}
+
+.input-row {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.attach-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 20px;
+}
+
+.attach-btn:hover { border-color: var(--accent); }
+
+.attach-btn input[type="file"] {
+  display: none;
 }
 
 textarea#input {

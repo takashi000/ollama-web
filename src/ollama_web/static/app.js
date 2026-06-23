@@ -8,12 +8,17 @@ const modelSelect = document.getElementById("model-select");
 const thinkToggle = document.getElementById("think-toggle");
 const clearBtn = document.getElementById("clear-btn");
 const cancelBtn = document.getElementById("cancel-btn");
+const fileInput = document.getElementById("file-input");
+const attachmentsEl = document.getElementById("attachments");
+const sessionListEl = document.getElementById("session-list");
+const newSessionBtn = document.getElementById("new-session-btn");
 
-let messages = [];
+let currentSessionId = null;
+let currentSession = null;
+let pendingFiles = [];
 let abortController = null;
 
 function simpleMarkdownToHtml(text) {
-  // Render plain text safely as HTML without external dependencies.
   const el = document.createElement("div");
   el.setAttribute("style", "white-space:pre-wrap");
   el.textContent = text;
@@ -115,18 +120,210 @@ function parseSseEvent(chunk) {
   return events;
 }
 
+async function loadSessions() {
+  try {
+    const res = await fetch("/api/sessions");
+    if (!res.ok) throw new Error(res.statusText);
+    const data = await res.json();
+    renderSessionList(data.sessions || []);
+  } catch (err) {
+    console.error("failed to load sessions", err);
+    renderSessionList([]);
+  }
+}
+
+function renderSessionList(sessions) {
+  sessionListEl.innerHTML = "";
+  if (!sessions.length) {
+    const li = document.createElement("li");
+    li.className = "empty";
+    li.textContent = "セッションがありません";
+    sessionListEl.appendChild(li);
+    return;
+  }
+  for (const s of sessions) {
+    const li = document.createElement("li");
+    li.dataset.id = s.id;
+    if (s.id === currentSessionId) li.classList.add("active");
+    const title = document.createElement("span");
+    title.className = "title";
+    title.textContent = s.title || s.id;
+    const del = document.createElement("button");
+    del.className = "delete";
+    del.textContent = "削除";
+    del.title = "セッションを削除";
+    del.addEventListener("click", (e) => {
+      e.stopPropagation();
+      deleteSession(s.id);
+    });
+    li.append(title, del);
+    li.addEventListener("click", () => selectSession(s.id));
+    sessionListEl.appendChild(li);
+  }
+}
+
+async function createSession() {
+  try {
+    const res = await fetch("/api/sessions", { method: "POST" });
+    if (!res.ok) throw new Error(res.statusText);
+    const session = await res.json();
+    await loadSessions();
+    await selectSession(session.id);
+  } catch (err) {
+    console.error("failed to create session", err);
+    alert("セッションの作成に失敗しました");
+  }
+}
+
+async function deleteSession(id) {
+  if (!confirm("このセッションを削除しますか？")) return;
+  try {
+    const res = await fetch(`/api/sessions/${id}`, { method: "DELETE" });
+    if (!res.ok) throw new Error(res.statusText);
+    if (currentSessionId === id) {
+      currentSessionId = null;
+      currentSession = null;
+      chatEl.innerHTML = "";
+      pendingFiles = [];
+      renderAttachments();
+    }
+    await loadSessions();
+  } catch (err) {
+    console.error("failed to delete session", err);
+    alert("セッションの削除に失敗しました");
+  }
+}
+
+async function selectSession(id) {
+  try {
+    const res = await fetch(`/api/sessions/${id}`);
+    if (!res.ok) throw new Error(res.statusText);
+    const session = await res.json();
+    currentSessionId = session.id;
+    currentSession = session;
+    renderSession();
+    renderSessionList((await (await fetch("/api/sessions")).json()).sessions || []);
+  } catch (err) {
+    console.error("failed to select session", err);
+  }
+}
+
+function renderSession() {
+  chatEl.innerHTML = "";
+  if (!currentSession) return;
+  const msgs = currentSession.messages || [];
+  for (const m of msgs) {
+    if (m.role === "user") {
+      const body = addMessage("user").body;
+      body.innerHTML = renderMarkdown(m.content);
+      highlightIn(body);
+      if (m.attachments && m.attachments.length) {
+        const info = document.createElement("div");
+        info.style.fontSize = "12px";
+        info.style.color = "var(--muted)";
+        info.style.marginTop = "6px";
+        const names = m.attachments
+          .map((fid) => {
+            const f = (currentSession.files || []).find((x) => x.id === fid);
+            return f ? f.name : fid;
+          })
+          .join(", ");
+        info.textContent = `添付: ${names}`;
+        body.appendChild(info);
+      }
+    } else if (m.role === "assistant") {
+      const body = addMessage("assistant").body;
+      body.innerHTML = renderMarkdown(m.content);
+      highlightIn(body);
+    }
+  }
+}
+
+function renderAttachments() {
+  attachmentsEl.innerHTML = "";
+  for (const f of pendingFiles) {
+    const chip = document.createElement("span");
+    chip.className = "attachment-chip";
+    chip.textContent = f.name;
+    const remove = document.createElement("span");
+    remove.className = "remove";
+    remove.textContent = "×";
+    remove.addEventListener("click", () => {
+      pendingFiles = pendingFiles.filter((x) => x !== f);
+      renderAttachments();
+    });
+    chip.appendChild(remove);
+    attachmentsEl.appendChild(chip);
+  }
+}
+
+async function uploadFiles(files) {
+  if (!currentSessionId) {
+    await createSession();
+  }
+  if (!currentSessionId) return;
+
+  const form = new FormData();
+  for (const file of files) {
+    form.append("files", file);
+  }
+  try {
+    const res = await fetch(`/api/sessions/${currentSessionId}/files`, {
+      method: "POST",
+      body: form,
+    });
+    if (!res.ok) throw new Error(res.statusText);
+    const data = await res.json();
+    for (const f of data.files || []) {
+      if (f.error) {
+        alert(`${f.name}: ${f.error}`);
+        continue;
+      }
+      pendingFiles.push({ id: f.id, name: f.name });
+    }
+    renderAttachments();
+    await selectSession(currentSessionId);
+  } catch (err) {
+    console.error("failed to upload files", err);
+    alert("ファイルのアップロードに失敗しました");
+  }
+}
+
+fileInput.addEventListener("change", () => {
+  if (fileInput.files && fileInput.files.length) {
+    uploadFiles(fileInput.files);
+    fileInput.value = "";
+  }
+});
+
+newSessionBtn.addEventListener("click", createSession);
+
 async function send() {
   const text = inputEl.value.trim();
-  if (!text) return;
-  inputEl.value = "";
+  if (!text && !pendingFiles.length) return;
+
+  if (!currentSessionId) {
+    await createSession();
+  }
+  if (!currentSessionId) return;
+
+  if (text) inputEl.value = "";
   sendBtn.disabled = true;
   cancelBtn.disabled = false;
   abortController = new AbortController();
 
-  messages.push({ role: "user", content: text });
+  const fileIds = pendingFiles.map((f) => f.id);
   const userBody = addMessage("user").body;
-  userBody.innerHTML = renderMarkdown(text);
+  let displayContent = text;
+  if (pendingFiles.length) {
+    const names = pendingFiles.map((f) => f.name).join(", ");
+    displayContent += (text ? "\n\n" : "") + `添付ファイル: ${names}`;
+  }
+  userBody.innerHTML = renderMarkdown(displayContent);
   highlightIn(userBody);
+
+  pendingFiles = [];
+  renderAttachments();
 
   const assistantMsg = addMessage("assistant");
   const assistantBody = assistantMsg.body;
@@ -139,7 +336,14 @@ async function send() {
   const model = modelSelect.value;
   const think = thinkToggle.checked;
 
-  const requestBody = JSON.stringify({ model, messages, think });
+  const requestBody = JSON.stringify({
+    model,
+    messages: text ? [{ role: "user", content: text }] : [],
+    think,
+    session_id: currentSessionId,
+    file_ids: fileIds,
+  });
+
   let res;
   try {
     res = await fetch("/api/chat", {
@@ -169,7 +373,6 @@ async function send() {
   const decoder = new TextDecoder();
   let buffer = "";
 
-  // Remove the placeholder "…" as soon as real content arrives.
   let placeholderCleared = false;
 
   function appendDelta(content) {
@@ -188,7 +391,7 @@ async function send() {
     if (done) break;
     buffer += decoder.decode(value, { stream: true });
 
-    const endIndex = buffer.lastIndexOf("\n\n");
+    const endIndex = buffer.lastIndexOf("\\n\\n");
     if (endIndex === -1) continue;
     const chunk = buffer.slice(0, endIndex);
     buffer = buffer.slice(endIndex + 2);
@@ -250,13 +453,12 @@ async function send() {
     assistantBody.textContent = "（応答なし）";
   }
 
-  if (assistantText) {
-    messages.push({ role: "assistant", content: assistantText });
-  }
   abortController = null;
   cancelBtn.disabled = true;
   sendBtn.disabled = false;
   inputEl.focus();
+
+  await selectSession(currentSessionId);
 }
 
 formEl.addEventListener("submit", (e) => {
@@ -272,7 +474,6 @@ inputEl.addEventListener("keydown", (e) => {
 });
 
 clearBtn.addEventListener("click", () => {
-  messages = [];
   chatEl.innerHTML = "";
 });
 
@@ -281,3 +482,5 @@ cancelBtn.addEventListener("click", () => {
     abortController.abort();
   }
 });
+
+loadSessions();

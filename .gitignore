@@ -168,4 +168,9 @@ models/
 *.gguf
 *.bin
 
+# Session data
+data/
+
+# other
+.ruff_cache
 *.lock

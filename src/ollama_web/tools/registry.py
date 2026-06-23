@@ -6,6 +6,8 @@ import json
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 
+from .fetch import search_and_fetch
+from .pdf import pdf_to_text
 from .scrape import scrape_url
 from .search import web_search
 
@@ -72,6 +74,8 @@ def default_registry() -> ToolRegistry:
     reg = ToolRegistry()
     reg.register(web_search)
     reg.register(scrape_url)
+    reg.register(search_and_fetch)
+    reg.register(pdf_to_text)
     return reg
 
 
