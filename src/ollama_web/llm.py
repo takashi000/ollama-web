@@ -44,6 +44,11 @@ def _tool_calls(response: Any) -> list[dict[str, Any]]:
     msg = getattr(response, "message", None) or (
         response.get("message") if isinstance(response, dict) else None
     )
+    return _tool_calls_from_message(msg)
+
+
+def _tool_calls_from_message(msg: Any) -> list[dict[str, Any]]:
+    """Extract tool calls from a message object/dict."""
     if msg is None:
         return []
     calls = getattr(msg, "tool_calls", None) if not isinstance(msg, dict) else msg.get("tool_calls")
@@ -172,11 +177,11 @@ def stream_chat_with_tools(
     registry: ToolRegistry | None = None,
     host: str | None = None,
 ) -> Iterator[dict[str, Any]]:
-    """Like ``chat_with_tools`` but the final answer is streamed from ollama.
+    """Run a tool-calling chat loop and yield real streaming events from ollama.
 
-    Tool-call resolution rounds are performed in non-streaming mode; once no
-    further tool calls are requested the final response is streamed token by
-    token via ``delta`` events.
+    The final assistant answer is streamed token-by-token. Tool and thinking
+    events are emitted inline so the UI can render them inside the assistant
+    message.
     """
     raw_client = get_client(host)
     reg = registry or default_registry()
@@ -185,43 +190,60 @@ def stream_chat_with_tools(
     rounds = 0
     while rounds < MAX_TOOL_ROUNDS:
         rounds += 1
+        full_message: dict[str, Any] = {"role": "assistant", "content": "", "thinking": ""}
+        tool_calls: list[dict[str, Any]] = []
         try:
-            resp = cast(Any, raw_client).chat(
+            stream = cast(Any, raw_client).chat(
                 model=model,
                 messages=messages,
                 tools=tools,
                 think=think,
-                stream=False,
+                stream=True,
             )
         except Exception as exc:  # noqa: BLE001
             yield {"type": "error", "message": str(exc)}
             return
 
-        calls = _tool_calls(resp)
-        if not calls:
-            # Stream the final answer by re-issuing the last messages.
-            # We already have the full non-streamed content; emit it as deltas
-            # in small chunks to simulate streaming for the UI.
-            thinking = _assistant_thinking(resp)
+        for chunk in stream:
+            thinking = _assistant_thinking(chunk)
             if thinking:
+                full_message.setdefault("thinking", "")
+                full_message["thinking"] += thinking
                 yield {"type": "thinking", "content": thinking}
-            content = _assistant_content(resp)
+            content = _assistant_content(chunk)
             if content:
-                for chunk in _chunk_text(content, 64):
-                    yield {"type": "delta", "content": chunk}
+                full_message["content"] += content
+                yield {"type": "delta", "content": content}
+
+            calls = _tool_calls_from_message(getattr(chunk, "message", None))
+            for c in calls:
+                # Avoid duplicates from repeated chunks containing the same call.
+                if c not in tool_calls:
+                    tool_calls.append(c)
+
+        # Reconstruct the assistant message including any tool_calls so the
+        # next round can see them.
+        if tool_calls:
+            full_message["tool_calls"] = tool_calls
+        msg = _assistant_message_chunk(full_message)
+        if msg is not None:
+            messages.append(msg)
+
+        if not tool_calls:
             yield {"type": "done"}
             return
 
-        messages.append(_assistant_message(resp))
-        for call in calls:
+        for call in tool_calls:
             name = call.get("name", "")
             args = call.get("arguments", {})
             yield {"type": "tool_start", "name": name, "arguments": args}
-            result = reg.execute(name, args if isinstance(args, dict) else json.dumps(args))
+            result = reg.execute(
+                name, args if isinstance(args, dict) else json.dumps(args)
+            )
             yield {"type": "tool_end", "name": name, "result": result}
             messages.append(Message(role="tool", tool_name=name, content=result))
 
-    # Final attempt without tools.
+    # Exceeded tool rounds: ask for a final answer without tools.
     try:
         stream = cast(Any, raw_client).chat(
             model=model,
@@ -229,16 +251,17 @@ def stream_chat_with_tools(
             think=think,
             stream=True,
         )
-        for chunk in stream:
-            thinking = _assistant_thinking(chunk)
-            if thinking:
-                yield {"type": "thinking", "content": thinking}
-            content = _assistant_content(chunk)
-            if content:
-                yield {"type": "delta", "content": content}
     except Exception as exc:  # noqa: BLE001
         yield {"type": "error", "message": str(exc)}
         return
+
+    for chunk in stream:
+        thinking = _assistant_thinking(chunk)
+        if thinking:
+            yield {"type": "thinking", "content": thinking}
+        content = _assistant_content(chunk)
+        if content:
+            yield {"type": "delta", "content": content}
     yield {"type": "done"}
 
 
@@ -294,3 +317,34 @@ def _chunk_text(text: str, size: int) -> Iterator[str]:
     """Yield successive chunks of ``text`` up to ``size`` characters."""
     for i in range(0, len(text), size):
         yield text[i : i + size]
+
+
+def _assistant_message_chunk(full_message: dict[str, Any]) -> Message | None:
+    """Build an assistant ``Message`` from the accumulated streamed message.
+
+    ``tool_calls`` are expected to be already accumulated into ``full_message``.
+    If the message is empty, ``None`` is returned.
+    """
+    content = full_message.get("content", "")
+    thinking = full_message.get("thinking", "")
+    calls = full_message.get("tool_calls", [])
+
+    if not content and not thinking and not calls:
+        return None
+
+    kwargs: dict[str, Any] = {"role": "assistant", "content": content}
+    if thinking:
+        kwargs["thinking"] = thinking
+    if calls:
+        # Convert plain dicts into ollama ToolCall objects.
+        tc_list: list[Message.ToolCall] = []
+        for c in calls:
+            name = c.get("name", "")
+            args = c.get("arguments", {})
+            tc_list.append(
+                Message.ToolCall(
+                    function=Message.ToolCall.Function(name=name, arguments=args)
+                )
+            )
+        kwargs["tool_calls"] = tc_list
+    return Message(**kwargs)

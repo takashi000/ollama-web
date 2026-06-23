@@ -53,41 +53,46 @@ function addMessage(role) {
   const body = document.createElement("div");
   body.className = "body";
   div.append(roleEl, body);
+  let extras = null;
+  if (role === "assistant") {
+    extras = document.createElement("div");
+    extras.className = "extras";
+    div.appendChild(extras);
+  }
   chatEl.appendChild(div);
   chatEl.scrollTop = chatEl.scrollHeight;
-  return body;
+  return { body, extras };
 }
 
-function addToolBubble(name, args) {
-  const div = document.createElement("div");
-  div.className = "tool";
+function addToolBubble(parentExtras, name, args) {
+  const det = document.createElement("details");
+  det.className = "tool";
   const label = (TOOLS.find((t) => t.name === name) || { label: name }).label;
-  const status = document.createElement("span");
-  status.className = "status";
-  status.textContent = `${label} を実行中…`;
-  div.appendChild(status);
+  const sum = document.createElement("summary");
+  sum.textContent = `${label} を実行中…`;
+  det.appendChild(sum);
   if (args && Object.keys(args).length) {
     const a = document.createElement("div");
     a.className = "args";
     a.textContent = JSON.stringify(args, null, 2);
-    div.appendChild(a);
+    det.appendChild(a);
   }
   const result = document.createElement("div");
   result.className = "result";
-  div.appendChild(result);
-  chatEl.appendChild(div);
+  det.appendChild(result);
+  parentExtras.appendChild(det);
   chatEl.scrollTop = chatEl.scrollHeight;
-  return { div, status, result };
+  return { det, sum, result };
 }
 
-function addThinkingBubble() {
+function addThinkingBubble(parentExtras) {
   const det = document.createElement("details");
   det.className = "thinking";
   const sum = document.createElement("summary");
   sum.textContent = "思考プロセス";
   const body = document.createElement("div");
   det.append(sum, body);
-  chatEl.appendChild(det);
+  parentExtras.appendChild(det);
   chatEl.scrollTop = chatEl.scrollHeight;
   return body;
 }
@@ -119,11 +124,13 @@ async function send() {
   abortController = new AbortController();
 
   messages.push({ role: "user", content: text });
-  const userBody = addMessage("user");
+  const userBody = addMessage("user").body;
   userBody.innerHTML = renderMarkdown(text);
   highlightIn(userBody);
 
-  const assistantBody = addMessage("assistant");
+  const assistantMsg = addMessage("assistant");
+  const assistantBody = assistantMsg.body;
+  const assistantExtras = assistantMsg.extras;
   assistantBody.textContent = "…";
   let assistantText = "";
   let thinkingBody = null;
@@ -162,6 +169,20 @@ async function send() {
   const decoder = new TextDecoder();
   let buffer = "";
 
+  // Remove the placeholder "…" as soon as real content arrives.
+  let placeholderCleared = false;
+
+  function appendDelta(content) {
+    if (!placeholderCleared) {
+      assistantBody.innerHTML = "";
+      placeholderCleared = true;
+    }
+    assistantText += content;
+    assistantBody.innerHTML = renderMarkdown(assistantText);
+    highlightIn(assistantBody);
+    chatEl.scrollTop = chatEl.scrollHeight;
+  }
+
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
@@ -183,23 +204,21 @@ async function send() {
       }
 
       if (ev.type === "tool_start") {
-        const bubble = addToolBubble(ev.name, ev.arguments);
+        const bubble = addToolBubble(assistantExtras, ev.name, ev.arguments);
         pendingTools.push(bubble);
       } else if (ev.type === "tool_end") {
         const b = pendingTools.shift();
         if (b) {
-          b.status.textContent = `${b.status.textContent.replace("実行中…", "完了")}`;
+          b.sum.textContent = b.sum.textContent.replace("実行中…", "完了");
           b.result.textContent = (ev.result || "").slice(0, 2000);
+          chatEl.scrollTop = chatEl.scrollHeight;
         }
       } else if (ev.type === "thinking") {
-        if (!thinkingBody) thinkingBody = addThinkingBubble();
+        if (!thinkingBody) thinkingBody = addThinkingBubble(assistantExtras);
         thinkingBody.textContent += ev.content;
         chatEl.scrollTop = chatEl.scrollHeight;
       } else if (ev.type === "delta") {
-        assistantText += ev.content;
-        assistantBody.innerHTML = renderMarkdown(assistantText);
-        highlightIn(assistantBody);
-        chatEl.scrollTop = chatEl.scrollHeight;
+        appendDelta(ev.content);
       } else if (ev.type === "error") {
         assistantBody.innerHTML += `<span style="color:#f85149">エラー: ${ev.message}</span>`;
       } else if (ev.type === "done") {

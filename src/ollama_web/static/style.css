@@ -97,34 +97,42 @@ main#chat {
 .message p { margin: 8px 0; }
 .message ul, .message ol { padding-left: 22px; }
 
-.tool {
-  max-width: 860px;
-  width: 100%;
-  margin: 0 auto;
-  padding: 8px 12px;
-  border-radius: 8px;
-  border: 1px dashed var(--border);
-  background: var(--tool-bg);
-  color: var(--muted);
-  font-size: 13px;
+.message .extras {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
-.tool .name { color: var(--accent); font-weight: 600; }
-.tool .args, .tool .result { color: var(--muted); white-space: pre-wrap; word-break: break-word; }
-.tool details summary { cursor: pointer; color: var(--accent); }
-
-.thinking {
-  max-width: 860px;
-  width: 100%;
-  margin: 0 auto;
-  padding: 8px 12px;
+.message .extras details {
   border-radius: 8px;
   border: 1px solid var(--border);
-  background: var(--think-bg);
-  color: var(--muted);
+  padding: 6px 10px;
   font-size: 13px;
+  color: var(--muted);
 }
-.thinking summary { cursor: pointer; color: var(--accent); }
+
+.message .extras details summary {
+  cursor: pointer;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.message .extras details .args,
+.message .extras details .result {
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin-top: 6px;
+}
+
+.message .extras details.tool {
+  background: var(--tool-bg);
+  border-style: dashed;
+}
+
+.message .extras details.thinking {
+  background: var(--think-bg);
+}
 
 form#input-form {
   display: flex;

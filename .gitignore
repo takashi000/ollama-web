@@ -167,3 +167,5 @@ Thumbs.db
 models/
 *.gguf
 *.bin
+
+*.lock
