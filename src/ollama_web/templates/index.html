@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ollama-web</title>
+  <link rel="stylesheet" href="{{ url_for('static', path='style.css') }}" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.0/marked.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+</head>
+<body>
+  <header>
+    <h1>ollama-web</h1>
+    <div class="controls">
+      <label for="model-select">モデル:</label>
+      <select id="model-select">
+        {% if models %}
+          {% for m in models %}
+            <option value="{{ m }}" {% if m == default_model %}selected{% endif %}>{{ m }}</option>
+          {% endfor %}
+        {% else %}
+          <option value="{{ default_model }}" selected>{{ default_model }}</option>
+        {% endif %}
+      </select>
+      <label class="think-toggle">
+        <input type="checkbox" id="think-toggle" /> thinking
+      </label>
+      <button id="clear-btn" type="button">会話クリア</button>
+    </div>
+  </header>
+
+  <main id="chat"></main>
+
+  <form id="input-form">
+    <textarea id="input" placeholder="メッセージを入力… (Enter で送信 / Shift+Enter で改行)"
+              rows="2" autofocus></textarea>
+    <button type="submit" id="send-btn">送信</button>
+    <button type="button" id="cancel-btn" disabled>停止</button>
+  </form>
+
+  <script>
+    const TOOLS = [
+      { name: "web_search", label: "Web検索" },
+      { name: "scrape_url", label: "スクレイピング" },
+    ];
+  </script>
+  <script src="{{ url_for('static', path='app.js') }}"></script>
+</body>
+</html>
