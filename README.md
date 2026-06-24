@@ -28,11 +28,11 @@ uv venv .venv
 uv pip install -e ".[dev]" -p .venv
 ```
 
-`requirements.txt` から本番依存だけを入れる場合:
+本番依存だけを入れる場合:
 
 ```bash
 uv venv .venv
-uv pip install -r requirements.txt -p .venv
+uv pip install -e . -p .venv
 ```
 
 ## Usage
@@ -98,4 +98,10 @@ mypy src/
 
 ## License
 
-MIT
+SPDX-License-Identifier: MIT
+
+This project is licensed under the MIT License.  
+See [LICENSE](LICENSE) for the full text.
+
+Third-party libraries bundled with or depended upon by this project are listed in
+[THIRD_PARTY_LICENSES.txt](THIRD_PARTY_LICENSES.txt).
