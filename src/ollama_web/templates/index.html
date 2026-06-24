@@ -5,11 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>ollama-web</title>
   <link rel="stylesheet" href="{{ url_for('static', path='style.css') }}" />
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css" />
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css" />
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.0/marked.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.js"></script>
+  <link rel="stylesheet" href="{{ url_for('static', path='vendor/github-dark.min.css') }}" />
+  <link rel="stylesheet" href="{{ url_for('static', path='vendor/katex.min.css') }}" />
+  <script src="{{ url_for('static', path='vendor/marked.min.js') }}"></script>
+  <script src="{{ url_for('static', path='vendor/purify.min.js') }}"></script>
+  <script src="{{ url_for('static', path='vendor/highlight.min.js') }}"></script>
+  <script src="{{ url_for('static', path='vendor/katex.min.js') }}"></script>
 </head>
 <body>
   <aside id="sidebar">
@@ -60,15 +61,7 @@
       </div>
     </form>
   </div>
-
-  <script>
-    const TOOLS = [
-      { name: "web_search", label: "Web検索" },
-      { name: "scrape_url", label: "スクレイピング" },
-      { name: "search_and_fetch", label: "ファイル検索・取得" },
-      { name: "pdf_to_text", label: "PDFテキスト変換" },
-    ];
-  </script>
+  <script src="{{ url_for('static', path='tools.js') }}"></script>
   <script src="{{ url_for('static', path='app.js') }}"></script>
 </body>
 </html>

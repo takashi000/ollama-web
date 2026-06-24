@@ -198,7 +198,10 @@ def chat_with_tools(
 
     # Exceeded tool rounds: ask for a final answer without tools.
     logger.info(
-        "max tool rounds exceeded, requesting final answer without tools (cumulative_tool_chars=%d)",
+        (
+            "max tool rounds exceeded, requesting final answer without tools "
+            "(cumulative_tool_chars=%d)"
+        ),
         cumulative_tool_chars,
     )
     yield {
@@ -354,7 +357,12 @@ def stream_chat_with_tools(
             # Always truncate per-tool result immediately so it does not bloat
             # the context even before we reach the cumulative limit.
             result = _trim_tool_result(result, settings.max_tool_result_chars)
-            logger.info("tool %s executed len=%d elapsed=%.2fs", name, len(result), time.time() - t1)
+            logger.info(
+                "tool %s executed len=%d elapsed=%.2fs",
+                name,
+                len(result),
+                time.time() - t1,
+            )
             yield {"type": "tool_end", "name": name, "result": result}
             tool_results.append((name, result))
             total_result_len += len(result)
@@ -380,7 +388,10 @@ def stream_chat_with_tools(
 
     # Exceeded tool rounds: ask for a final answer without tools.
     logger.info(
-        "max tool rounds exceeded, requesting final answer without tools (cumulative_tool_chars=%d)",
+        (
+            "max tool rounds exceeded, requesting final answer without tools "
+            "(cumulative_tool_chars=%d)"
+        ),
         cumulative_tool_chars,
     )
     yield {

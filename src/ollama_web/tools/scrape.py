@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-import httpx
 from bs4 import BeautifulSoup
 
 from ..config import settings
+from .helper.safe_http import UnsafeURL, fetch_public_bytes
 
 
 def scrape_url(url: str, max_chars: int | None = None) -> str:
@@ -27,17 +27,15 @@ def scrape_url(url: str, max_chars: int | None = None) -> str:
         return "Invalid URL."
 
     limit = max_chars if max_chars is not None and max_chars > 0 else settings.scrape_max_chars
-    headers = {"User-Agent": "ollama-web/0.1 (+https://github.com/local)"}
-
     try:
-        with httpx.Client(
-            timeout=settings.scrape_timeout,
-            follow_redirects=True,
-            headers=headers,
-        ) as client:
-            resp = client.get(url)
-            resp.raise_for_status()
-            html = resp.text
+        data, final_url, content_type = fetch_public_bytes(url, timeout=settings.scrape_timeout)
+        encoding = "utf-8"
+        if "charset=" in content_type:
+            encoding = content_type.rsplit("charset=", 1)[-1].split(";", 1)[0].strip()
+        html = data.decode(encoding or "utf-8", errors="replace")
+        url = final_url
+    except UnsafeURL as exc:
+        return f"Blocked URL: {exc}"
     except Exception as exc:  # noqa: BLE001
         return f"Failed to fetch {url}: {exc}"
 

@@ -10,7 +10,10 @@ from starlette.middleware.cors import CORSMiddleware
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
+from .auth import AuthMiddleware
 from .config import settings
+from .middleware import SecurityHeadersMiddleware
+from .routes import auth as auth_route
 from .routes import chat as chat_route
 from .routes import models as models_route
 from .routes import pages as pages_route
@@ -23,6 +26,10 @@ _STATIC_DIR = Path(__file__).resolve().parent / "static"
 def create_app() -> Starlette:
     """Build and return the configured Starlette application."""
     routes = [
+        Route("/login", pages_route.login, name="login_page"),
+        Route("/api/auth/login", auth_route.login, methods=["POST"], name="auth_login"),
+        Route("/api/auth/logout", auth_route.logout, methods=["POST"], name="auth_logout"),
+        Route("/api/auth/status", auth_route.status, methods=["GET"], name="auth_status"),
         Route("/", pages_route.index, name="index"),
         Route("/api/chat", chat_route.chat, methods=["POST"], name="chat"),
         Route("/api/models", models_route.get_models, methods=["GET"], name="models"),
@@ -61,14 +68,17 @@ def create_app() -> Starlette:
         Mount("/static", app=StaticFiles(directory=str(_STATIC_DIR)), name="static"),
     ]
 
-    middleware = [
-        Middleware(
-            CORSMiddleware,
-            allow_origins=["*"],
-            allow_methods=["*"],
-            allow_headers=["*"],
+    middleware = [Middleware(SecurityHeadersMiddleware), Middleware(AuthMiddleware)]
+    if settings.allowed_origins:
+        middleware.append(
+            Middleware(
+                CORSMiddleware,
+                allow_origins=settings.allowed_origins,
+                allow_methods=["GET", "POST", "DELETE"],
+                allow_headers=["Content-Type", "X-CSRF-Token"],
+                allow_credentials=True,
+            )
         )
-    ]
 
     app = Starlette(routes=routes, middleware=middleware)
     app.state.settings = settings

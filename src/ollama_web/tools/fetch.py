@@ -2,18 +2,15 @@
 
 from __future__ import annotations
 
-import base64
 import mimetypes
 import re
 from pathlib import Path
 from typing import Any
 
-import httpx
-
 from ..config import settings
-from .pdf import extract_pdf_text
+from .helper.pdf import extract_pdf_text
+from .helper.safe_http import fetch_public_bytes
 from .scrape import scrape_url
-
 
 _FetchedFile = dict[str, Any]
 
@@ -43,7 +40,14 @@ def set_session_context(session_id: str | None) -> None:
     pass
 
 
-def store_fetched_file(session_id: str, name: str, data: bytes, mime: str, text: str, url: str) -> None:
+def store_fetched_file(
+    session_id: str,
+    name: str,
+    data: bytes,
+    mime: str,
+    text: str,
+    url: str,
+) -> None:
     """Store a fetched file so the chat route can persist it to the session."""
     if session_id:
         _fetched_files.setdefault(session_id, []).append(
@@ -73,6 +77,8 @@ def _filetype_query(query: str, file_type: str) -> str:
 
 def _is_matching_url(url: str, file_type: str) -> bool:
     suffix = f".{file_type}"
+    import httpx
+
     parsed = httpx.URL(url)
     path = parsed.path or ""
     if path.lower().endswith(suffix):
@@ -89,17 +95,13 @@ def _guess_mime(name: str, file_type: str) -> str:
 
 
 def _fetch_bytes(url: str) -> bytes:
-    with httpx.Client(
-        timeout=settings.scrape_timeout,
-        follow_redirects=True,
-        headers={"User-Agent": "ollama-web/0.1 (+https://github.com/local)"},
-    ) as client:
-        resp = client.get(url)
-        resp.raise_for_status()
-        return resp.content
+    data, _, _ = fetch_public_bytes(url, timeout=settings.scrape_timeout)
+    return data
 
 
 def _text_from_bytes(url: str, data: bytes, file_type: str, max_chars: int) -> str:
+    import httpx
+
     name = Path(httpx.URL(url).path or "file").name or f"file.{file_type}"
     if not name or "." not in name:
         name = f"file.{file_type}"
@@ -151,10 +153,11 @@ def search_and_fetch(
     if not ft:
         return "Invalid file type."
 
-    limit = (
+    limit = min(
         max_results
         if max_results is not None and max_results > 0
-        else settings.fetch_max_results
+        else settings.fetch_max_results,
+        settings.fetch_max_results,
     )
     per_file_chars = (
         max_chars if max_chars is not None and max_chars > 0 else settings.fetch_max_chars
@@ -183,10 +186,15 @@ def search_and_fetch(
         try:
             data = _fetch_bytes(url)
         except Exception as exc:  # noqa: BLE001
-            outputs.append(f"=== 候補 {idx} ===\nURL: {url}\nタイトル: {title}\n状態: 取得失敗 ({exc})\n")
+            outputs.append(
+                f"=== 候補 {idx} ===\n"
+                f"URL: {url}\nタイトル: {title}\n状態: 取得失敗 ({exc})\n"
+            )
             continue
 
         text = _text_from_bytes(url, data, ft, per_file_chars)
+        import httpx
+
         mime = _guess_mime(Path(httpx.URL(url).path or f"file.{ft}").name, ft)
         name = Path(httpx.URL(url).path or f"file.{ft}").name
         if session_id:

@@ -25,3 +25,13 @@ async def index(request: Request) -> Response:
         {"models": models, "default_model": default_model},
         media_type="text/html; charset=utf-8",
     )
+
+
+async def login(request: Request) -> Response:
+    """Render the PIN login page."""
+    return templates.TemplateResponse(
+        request,
+        "login.html",
+        {},
+        media_type="text/html; charset=utf-8",
+    )

@@ -38,6 +38,10 @@ ollama-web/
 # アプリケーションの実行
 ollama-web
 
+# LAN内のスマホ等からアクセスする場合
+# PINを固定し、待受アドレスを明示してください
+OLLAMA_WEB_PIN=123456 OLLAMA_WEB_HOST=0.0.0.0 ollama-web
+
 # テストの実行
 pytest
 
@@ -47,6 +51,13 @@ ruff check .
 # 型チェック
 mypy src/
 ```
+
+## セキュリティ設定
+
+- 既定の待受は `127.0.0.1` です。LAN公開する場合だけ `OLLAMA_WEB_HOST=0.0.0.0` を指定してください。
+- `OLLAMA_WEB_PIN` 未設定時は起動ごとにランダムPINが表示されます。
+- CORSは既定で無効です。必要な場合のみ `OLLAMA_WEB_ALLOWED_ORIGINS` に許可オリジンをカンマ区切りで指定してください。
+- Cookie署名鍵は `OLLAMA_WEB_SECRET_KEY` で固定できます。
 
 ## ライセンス
 

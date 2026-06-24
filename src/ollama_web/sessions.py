@@ -3,18 +3,26 @@
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from .config import settings
+
+_UUID_HEX_RE = re.compile(r"^[0-9a-f]{32}$")
 
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def is_valid_id(value: str) -> bool:
+    """Return whether a route id is a generated UUID hex string."""
+    return bool(_UUID_HEX_RE.fullmatch(value))
 
 
 _IMAGE_MIMES: set[str] = {
@@ -53,7 +61,7 @@ class ChatFile:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "ChatFile":
+    def from_dict(cls, data: dict[str, Any]) -> ChatFile:
         return cls(
             id=data["id"],
             name=data["name"],
@@ -89,7 +97,7 @@ class ChatMessage:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "ChatMessage":
+    def from_dict(cls, data: dict[str, Any]) -> ChatMessage:
         return cls(
             role=data.get("role", "user"),
             content=data.get("content", ""),
@@ -120,7 +128,11 @@ class SessionStore:
         out: list[dict[str, Any]] = []
         if not self.sessions_dir.exists():
             return out
-        for entry in sorted(self.sessions_dir.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
+        for entry in sorted(
+            self.sessions_dir.iterdir(),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        ):
             if not entry.is_dir():
                 continue
             session_file = entry / "session.json"
@@ -155,25 +167,37 @@ class SessionStore:
         return session
 
     def get(self, session_id: str) -> dict[str, Any] | None:
+        if not is_valid_id(session_id):
+            return None
         session_file = self._session_file(session_id)
         if not session_file.exists():
             return None
         try:
-            return json.loads(session_file.read_text(encoding="utf-8"))
+            return cast(dict[str, Any], json.loads(session_file.read_text(encoding="utf-8")))
         except Exception:  # noqa: BLE001
             return None
 
     def save(self, session: dict[str, Any]) -> None:
+        if not is_valid_id(str(session.get("id", ""))):
+            return
         session["updated_at"] = _now()
         self._save(session["id"], session)
 
     def _save(self, session_id: str, session: dict[str, Any]) -> None:
+        if not is_valid_id(session_id):
+            return
         session_file = self._session_file(session_id)
         session_file.parent.mkdir(parents=True, exist_ok=True)
         session_file.write_text(json.dumps(session, ensure_ascii=False, indent=2), encoding="utf-8")
 
     def delete(self, session_id: str) -> bool:
+        if not is_valid_id(session_id):
+            return False
         session_dir = self._session_dir(session_id)
+        try:
+            session_dir.resolve().relative_to(self.sessions_dir.resolve())
+        except ValueError:
+            return False
         if not session_dir.exists():
             return False
         try:
@@ -219,13 +243,17 @@ class SessionStore:
         text: str,
         source: str = "upload",
     ) -> ChatFile:
+        if not is_valid_id(session_id):
+            raise ValueError("Invalid session id")
         self._session_dir(session_id).mkdir(parents=True, exist_ok=True)
         file_id = uuid.uuid4().hex
         ext = Path(name).suffix
         stored_name = f"{file_id}{ext}"
         file_path = self._files_dir(session_id) / stored_name
         file_path.write_bytes(data)
-        rel_path = str((self._session_dir(session_id) / "files" / stored_name).relative_to(self.data_dir))
+        rel_path = str(
+            (self._session_dir(session_id) / "files" / stored_name).relative_to(self.data_dir)
+        )
         chat_file = ChatFile(
             id=file_id,
             name=name,
@@ -244,6 +272,8 @@ class SessionStore:
         return chat_file
 
     def remove_file(self, session_id: str, file_id: str) -> bool:
+        if not is_valid_id(session_id) or not is_valid_id(file_id):
+            return False
         session = self.get(session_id)
         if session is None:
             return False
@@ -254,7 +284,8 @@ class SessionStore:
         files.remove(target)
         session["files"] = files
         try:
-            abs_path = self.data_dir / target["path"]
+            abs_path = (self.data_dir / target["path"]).resolve()
+            abs_path.relative_to(self.data_dir)
             if abs_path.exists():
                 abs_path.unlink()
         except Exception:  # noqa: BLE001
@@ -263,6 +294,8 @@ class SessionStore:
         return True
 
     def get_file(self, session_id: str, file_id: str) -> ChatFile | None:
+        if not is_valid_id(session_id) or not is_valid_id(file_id):
+            return None
         session = self.get(session_id)
         if session is None:
             return None
@@ -275,9 +308,9 @@ class SessionStore:
         chat_file = self.get_file(session_id, file_id)
         if chat_file is None:
             return None
-        abs_path = self.data_dir / chat_file.path
+        abs_path = (self.data_dir / chat_file.path).resolve()
         try:
+            abs_path.relative_to(self.data_dir)
             return abs_path.read_bytes()
         except Exception:  # noqa: BLE001
             return None
-

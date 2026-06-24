@@ -7,6 +7,10 @@ from pathlib import Path
 
 from PIL import Image
 
+from ...config import settings
+
+Image.MAX_IMAGE_PIXELS = settings.max_image_pixels
+
 
 _IMAGE_FORMATS: dict[str, str] = {
     "png": "PNG",
@@ -31,31 +35,21 @@ def resize_image(
     max_dimension: int = 1024,
     quality: int = 85,
 ) -> bytes:
-    """Resize and re-encode an image to reduce payload size for ollama.
-
-    Args:
-      data: Raw image bytes.
-      name: Original file name, used to guess the output format.
-      max_dimension: Maximum width or height in pixels.
-      quality: JPEG/WebP quality when re-encoding to a lossy format.
-
-    Returns:
-      Resized image bytes. If the input is already small, it may be returned
-      unchanged when re-encoding is not needed.
-    """
+    """Resize and re-encode an image to reduce payload size for ollama."""
     if not data:
         return data
 
     try:
         with Image.open(io.BytesIO(data)) as img:
-            # Preserve orientation if EXIF data exists.
-            img = img.convert("RGB")
+            if img.width * img.height > settings.max_image_pixels:
+                return data
+            processed = img.convert("RGB")
 
-            width, height = img.size
+            width, height = processed.size
             if width > max_dimension or height > max_dimension:
                 ratio = min(max_dimension / width, max_dimension / height)
                 new_size = (int(width * ratio), int(height * ratio))
-                img = img.resize(new_size, Image.Resampling.LANCZOS)
+                processed = processed.resize(new_size, Image.Resampling.LANCZOS)
 
             fmt = _format_from_name(name)
             output = io.BytesIO()
@@ -65,8 +59,7 @@ def resize_image(
                 save_kwargs["optimize"] = True
             elif fmt == "WEBP":
                 save_kwargs["quality"] = quality
-            img.save(output, format=fmt, **save_kwargs)
+            processed.save(output, format=fmt, **save_kwargs)
             return output.getvalue()
     except Exception:  # noqa: BLE001
-        # Fall back to the original bytes if anything goes wrong.
         return data

@@ -15,11 +15,40 @@ const newSessionBtn = document.getElementById("new-session-btn");
 const menuBtn = document.getElementById("menu-btn");
 const sidebar = document.getElementById("sidebar");
 const sidebarBackdrop = document.getElementById("sidebar-backdrop");
+const TOOLS = window.TOOLS || [];
 
 let currentSessionId = null;
 let currentSession = null;
 let pendingFiles = [];
 let abortController = null;
+
+function getCookie(name) {
+  const prefix = `${name}=`;
+  for (const part of document.cookie.split(";")) {
+    const trimmed = part.trim();
+    if (trimmed.startsWith(prefix)) {
+      return decodeURIComponent(trimmed.slice(prefix.length));
+    }
+  }
+  return "";
+}
+
+function csrfHeaders(headers = {}) {
+  const token = getCookie("ollama_web_csrf");
+  return token ? { ...headers, "X-CSRF-Token": token } : headers;
+}
+
+async function csrfFetch(url, options = {}) {
+  const method = (options.method || "GET").toUpperCase();
+  const headers = ["POST", "PUT", "PATCH", "DELETE"].includes(method)
+    ? csrfHeaders(options.headers || {})
+    : options.headers;
+  const res = await fetch(url, { ...options, headers });
+  if (res.status === 401) {
+    window.location.assign(`/login?next=${encodeURIComponent(window.location.pathname)}`);
+  }
+  return res;
+}
 
 function simpleMarkdownToHtml(text) {
   const el = document.createElement("div");
@@ -65,7 +94,12 @@ function renderMarkdown(text) {
     try {
       const { text: protectedText, placeholders } = protectMath(text);
       const html = marked.parse(protectedText);
-      if (typeof html === "string") return restoreMath(html, placeholders);
+      if (typeof html === "string") {
+        const restored = restoreMath(html, placeholders);
+        return typeof DOMPurify !== "undefined" && DOMPurify.sanitize
+          ? DOMPurify.sanitize(restored)
+          : simpleMarkdownToHtml(text);
+      }
     } catch {
       // fall through
     }
@@ -226,7 +260,7 @@ function renderSessionList(sessions) {
 
 async function createSession() {
   try {
-    const res = await fetch("/api/sessions", { method: "POST" });
+    const res = await csrfFetch("/api/sessions", { method: "POST" });
     if (!res.ok) throw new Error(res.statusText);
     const session = await res.json();
     await loadSessions();
@@ -240,7 +274,7 @@ async function createSession() {
 async function deleteSession(id) {
   if (!confirm("このセッションを削除しますか？")) return;
   try {
-    const res = await fetch(`/api/sessions/${id}`, { method: "DELETE" });
+    const res = await csrfFetch(`/api/sessions/${id}`, { method: "DELETE" });
     if (!res.ok) throw new Error(res.statusText);
     if (currentSessionId === id) {
       currentSessionId = null;
@@ -358,7 +392,7 @@ async function uploadFiles(files) {
     form.append("files", file);
   }
   try {
-    const res = await fetch(`/api/sessions/${currentSessionId}/files`, {
+    const res = await csrfFetch(`/api/sessions/${currentSessionId}/files`, {
       method: "POST",
       body: form,
     });
@@ -455,7 +489,7 @@ async function send() {
 
   let res;
   try {
-    res = await fetch("/api/chat", {
+    res = await csrfFetch("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: requestBody,
@@ -570,7 +604,10 @@ async function send() {
           assistantBody.innerHTML = "";
           placeholderCleared = true;
         }
-        assistantBody.innerHTML += `<span style="color:#f85149">エラー: ${escapeHtml(ev.message)}</span>`;
+        const span = document.createElement("span");
+        span.style.color = "#f85149";
+        span.textContent = `エラー: ${ev.message}`;
+        assistantBody.appendChild(span);
       } else if (ev.type === "done") {
         break;
       }

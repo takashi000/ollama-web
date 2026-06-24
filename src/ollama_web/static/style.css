@@ -489,3 +489,42 @@ textarea#input {
 
 button#send-btn { padding: 0 20px; }
 
+.login-page {
+  display: grid;
+  place-items: center;
+  min-height: 100vh;
+}
+
+.login-shell {
+  width: min(360px, calc(100vw - 32px));
+}
+
+.login-form {
+  display: grid;
+  gap: 12px;
+  padding: 22px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.login-form h1 {
+  margin: 0 0 8px;
+  font-size: 20px;
+}
+
+.login-form input {
+  width: 100%;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px;
+  font-size: 16px;
+}
+
+.login-form p {
+  min-height: 20px;
+  margin: 0;
+  color: var(--danger);
+}

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import functools
+import html
 import inspect
 import json
 import logging
@@ -14,9 +15,10 @@ from ollama._types import Image as OllamaImage
 from starlette.requests import Request
 from starlette.responses import StreamingResponse
 
-from ..sessions import SessionStore
+from ..config import settings
+from ..sessions import SessionStore, is_valid_id
 from ..tools.fetch import pop_fetched_files
-from ..tools.image import resize_image
+from ..tools.helper.image import resize_image
 from ..tools.registry import ToolRegistry, default_registry
 
 logger = logging.getLogger("ollama_web.chat")
@@ -31,12 +33,18 @@ _TOOL_SYSTEM_PROMPT = (
 )
 
 
+def _limit_text(text: str, limit: int) -> str:
+    if len(text) <= limit:
+        return text
+    return text[:limit] + "\n…[truncated]"
+
+
 def _parse_messages(raw: list[dict[str, Any]]) -> list[Message]:
     """Convert raw JSON message dicts into ``ollama.Message`` objects."""
     out: list[Message] = []
     for m in raw:
         role = m.get("role", "user")
-        content = m.get("content", "")
+        content = _limit_text(str(m.get("content", "") or ""), 20000)
         name = m.get("name")
         images = m.get("images")
         kwargs: dict[str, Any] = {"role": role, "content": content}
@@ -74,9 +82,9 @@ def _attachment_context(store: SessionStore, session_id: str, file_ids: list[str
         chat_file = store.get_file(session_id, file_id)
         if chat_file is None or chat_file.is_image:
             continue
-        text = chat_file.text or ""
+        text = _limit_text(chat_file.text or "", settings.max_attachment_text_chars)
         parts.append(
-            f"<attached-file name=\"{chat_file.name}\" id=\"{chat_file.id}\" "
+            f"<attached-file name=\"{html.escape(chat_file.name)}\" id=\"{chat_file.id}\" "
             f"source=\"{chat_file.source}\">\n{text}\n</attached-file>"
         )
     if not parts:
@@ -127,7 +135,9 @@ async def _chat_event_stream(
     think = payload.get("think")
 
     store: SessionStore = request.app.state.session_store
-    file_ids: list[str] = list(payload.get("file_ids", []))
+    file_ids: list[str] = [
+        str(file_id) for file_id in payload.get("file_ids", []) if is_valid_id(str(file_id))
+    ]
     user_content = ""
     assistant_text = ""
 
@@ -140,7 +150,11 @@ async def _chat_event_stream(
 
         raw_messages = payload.get("messages", [])
         if raw_messages:
-            user_content = str(raw_messages[-1].get("content", "") or "")
+            user_content = _limit_text(
+                str(raw_messages[-1].get("content", "") or ""),
+                request.app.state.settings.max_message_chars,
+            )
+            raw_messages[-1]["content"] = user_content
 
         attachment_ctx = ""
         if session_id and file_ids:
@@ -192,7 +206,10 @@ async def _chat_event_stream(
             messages, model, think=think, host=host, registry=registry
         ):
             if event.get("type") == "delta":
-                assistant_text += event.get("content", "")
+                assistant_text = _limit_text(
+                    assistant_text + event.get("content", ""),
+                    request.app.state.settings.max_message_chars,
+                )
             yield event
 
     except Exception as exc:  # noqa: BLE001
@@ -201,7 +218,10 @@ async def _chat_event_stream(
         yield {"type": "error", "message": error_msg}
         # Persist the error as the assistant message so it survives reloads
         # and re-renders in the chat pane.
-        assistant_text = f"[ERROR] {error_msg}\n\n画像を含むメッセージを送信する場合、vision 対応モデルを選択してください。"
+        assistant_text = (
+            f"[ERROR] {error_msg}\n\n"
+            "画像を含むメッセージを送信する場合、vision 対応モデルを選択してください。"
+        )
 
     finally:
         # Persist user and assistant messages to the session even when the
@@ -241,6 +261,16 @@ async def chat(request: Request) -> StreamingResponse:
     """POST /api/chat: stream chat events as Server-Sent Events."""
     try:
         body = await request.body()
+        if len(body) > request.app.state.settings.max_message_chars * 4:
+            data = json.dumps(
+                {"type": "error", "message": "Request body too large"},
+                ensure_ascii=False,
+            )
+            return StreamingResponse(
+                _single_event(data),
+                media_type="text/event-stream",
+                status_code=413,
+            )
         payload = json.loads(body.decode("utf-8"))
     except Exception as exc:
         logger.error("failed to parse request json: %s", exc)
@@ -252,7 +282,12 @@ async def chat(request: Request) -> StreamingResponse:
 
     session_id = payload.get("session_id")
     msg_count = len(payload.get("messages", []))
-    logger.info("chat request model=%s session=%s messages=%d", payload.get("model"), session_id, msg_count)
+    logger.info(
+        "chat request model=%s session=%s messages=%d",
+        payload.get("model"),
+        session_id,
+        msg_count,
+    )
     return StreamingResponse(
         _event_stream(request, payload, session_id),
         media_type="text/event-stream",

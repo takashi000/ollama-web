@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ollama-web login</title>
+  <link rel="stylesheet" href="{{ url_for('static', path='style.css') }}" />
+</head>
+<body class="login-page">
+  <main class="login-shell">
+    <form id="login-form" class="login-form">
+      <h1>ollama-web</h1>
+      <label for="pin-input">PIN</label>
+      <input id="pin-input" name="pin" type="password" autocomplete="current-password" autofocus />
+      <button type="submit">ログイン</button>
+      <p id="login-error" role="alert"></p>
+    </form>
+  </main>
+  <script src="{{ url_for('static', path='login.js') }}"></script>
+</body>
+</html>
