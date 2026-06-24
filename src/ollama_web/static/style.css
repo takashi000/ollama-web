@@ -318,6 +318,12 @@ header h1 {
   align-items: center;
   gap: 12px;
   margin-left: auto;
+  min-width: 0;
+}
+
+select#model-select {
+  max-width: 220px;
+  min-width: 0;
 }
 
 select, button, input[type="checkbox"] {
