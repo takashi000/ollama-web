@@ -436,6 +436,11 @@ async function send() {
       assistantBody.innerHTML = "";
       placeholderCleared = true;
     }
+    // Remove the "waiting" placeholder once actual content starts arriving.
+    const waiting = assistantBody.querySelector(".waiting-msg");
+    if (waiting) {
+      waiting.remove();
+    }
     assistantText += content;
     assistantBody.innerHTML = renderMarkdown(assistantText);
     highlightIn(assistantBody);
@@ -471,6 +476,33 @@ async function send() {
           b.sum.textContent = b.sum.textContent.replace("実行中…", "完了");
           b.result.textContent = (ev.result || "").slice(0, 2000);
           chatEl.scrollTop = chatEl.scrollHeight;
+        }
+        // Show a placeholder while waiting for the next ollama response so
+        // the UI does not look frozen between tool execution and deltas.
+        if (!placeholderCleared) {
+          assistantBody.innerHTML = "";
+          placeholderCleared = true;
+        }
+        if (assistantBody.querySelector(".waiting-msg") === null) {
+          const waiting = document.createElement("span");
+          waiting.className = "waiting-msg";
+          waiting.style.color = "var(--muted)";
+          waiting.style.fontStyle = "italic";
+          waiting.textContent = "ollama が回答を生成中…";
+          assistantBody.appendChild(waiting);
+        }
+      } else if (ev.type === "status") {
+        if (!placeholderCleared) {
+          assistantBody.innerHTML = "";
+          placeholderCleared = true;
+        }
+        if (assistantBody.querySelector(".waiting-msg") === null) {
+          const waiting = document.createElement("span");
+          waiting.className = "waiting-msg";
+          waiting.style.color = "var(--muted)";
+          waiting.style.fontStyle = "italic";
+          waiting.textContent = ev.message || "処理中…";
+          assistantBody.appendChild(waiting);
         }
       } else if (ev.type === "thinking") {
         if (!thinkingBody) thinkingBody = addThinkingBubble(assistantExtras);

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import io
 from pathlib import Path
 
 from pypdf import PdfReader
@@ -25,7 +26,7 @@ def extract_pdf_text(data: bytes, max_chars: int | None = None) -> str:
     limit = max_chars if max_chars is not None and max_chars > 0 else settings.fetch_max_chars
 
     try:
-        reader = PdfReader(stream=data)
+        reader = PdfReader(stream=io.BytesIO(data))
     except Exception as exc:  # noqa: BLE001
         return f"Failed to parse PDF: {exc}"
 

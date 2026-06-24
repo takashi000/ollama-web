@@ -28,6 +28,7 @@ class Settings:
     search_max_results: int = 5
     fetch_max_results: int = 3
     fetch_max_chars: int = 8000
+    max_tool_result_chars: int = 3000
 
 
 settings = Settings()

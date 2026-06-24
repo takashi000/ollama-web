@@ -22,6 +22,15 @@ from ..tools.registry import ToolRegistry, default_registry
 logger = logging.getLogger("ollama_web.chat")
 
 
+# System prompt injected when tools are enabled. Encourages the model to use
+# tools iteratively rather than firing many searches at once.
+_TOOL_SYSTEM_PROMPT = (
+    "あなたはWeb検索・スクレイピング・ファイル取得ツールを利用できます。"
+    "一度の回答で必要以上に多くの検索を同時に行わず、結果を確認してから次の調査を行ってください。"
+    "各ツール結果は要約されて提供されるため、重要なポイントを把握して活用してください。"
+)
+
+
 def _parse_messages(raw: list[dict[str, Any]]) -> list[Message]:
     """Convert raw JSON message dicts into ``ollama.Message`` objects."""
     out: list[Message] = []
@@ -154,6 +163,12 @@ async def _chat_event_stream(
         messages = _parse_messages(raw_messages)
         if session_messages:
             messages = session_messages + messages
+
+        # Prepend a system prompt to encourage efficient tool usage when tools
+        # are available. Avoid duplicate injection if the session already has
+        # a system message.
+        if not any(getattr(m, "role", None) == "system" for m in messages):
+            messages.insert(0, Message(role="system", content=_TOOL_SYSTEM_PROMPT))
 
         host = request.app.state.settings.ollama_host
 

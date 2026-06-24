@@ -13,7 +13,14 @@ from .config import settings
 from .tools.registry import ToolRegistry, default_registry
 
 # Maximum successive tool-call rounds before we force a final answer.
+# Some models request many tools per round; we keep this bounded but large
+# enough to let iterative research complete (e.g. search, then fetch).
 MAX_TOOL_ROUNDS = 5
+
+# Upper bound on the cumulative size of tool results sent back to ollama.
+# Larger values can cause ollama to spend a very long time processing the
+# context between rounds.
+MAX_TOOL_CONTEXT_CHARS = 24000
 
 # Type alias matching ollama's expected tools signature.
 ToolCallable = Callable[..., Any]
@@ -21,7 +28,16 @@ ToolCallable = Callable[..., Any]
 
 def get_client(host: str | None = None) -> ollama.Client:
     """Return an ``ollama.Client`` configured for the configured host."""
-    return ollama.Client(host=host or settings.ollama_host, timeout=settings.ollama_timeout)
+    import httpx
+
+    timeout = httpx.Timeout(
+        settings.ollama_timeout,
+        connect=10.0,
+        read=settings.ollama_timeout,
+        write=10.0,
+        pool=10.0,
+    )
+    return ollama.Client(host=host or settings.ollama_host, timeout=timeout)
 
 
 def list_models(host: str | None = None) -> list[str]:
@@ -106,13 +122,27 @@ def chat_with_tools(
 
     The final assistant message is streamed token-by-token via ``delta`` events.
     """
+    import logging
+
+    logger = logging.getLogger("ollama_web.llm")
+
     raw_client = get_client(host)
     reg = registry or default_registry()
     tools: list[ToolCallable] = [cast(Any, c) for c in reg.callables]
 
+    cumulative_tool_chars = 0
+
     rounds = 0
     while rounds < MAX_TOOL_ROUNDS:
         rounds += 1
+        logger.info(
+            "tool round %d/%d start messages=%d model=%s cumulative_tool_chars=%d",
+            rounds,
+            MAX_TOOL_ROUNDS,
+            len(messages),
+            model,
+            cumulative_tool_chars,
+        )
         try:
             resp = cast(Any, raw_client).chat(
                 model=model,
@@ -122,6 +152,7 @@ def chat_with_tools(
                 stream=False,
             )
         except Exception as exc:  # noqa: BLE001
+            logger.warning("ollama chat call failed: %s", exc)
             yield {"type": "error", "message": str(exc)}
             return
 
@@ -141,15 +172,48 @@ def chat_with_tools(
         messages.append(_assistant_message(resp))
 
         # Execute each requested tool and append tool-role messages.
+        tool_results: list[tuple[str, str]] = []
         for call in calls:
             name = call.get("name", "")
             args = call.get("arguments", {})
             yield {"type": "tool_start", "name": name, "arguments": args}
             result = reg.execute(name, args if isinstance(args, dict) else json.dumps(args))
+            result = _trim_tool_result(result, settings.max_tool_result_chars)
             yield {"type": "tool_end", "name": name, "result": result}
+            tool_results.append((name, result))
+
+        if sum(len(r) for _, r in tool_results) > MAX_TOOL_CONTEXT_CHARS:
+            budget = MAX_TOOL_CONTEXT_CHARS - len(tool_results) * 200
+            max_per_tool = budget // max(1, len(tool_results))
+            logger.warning(
+                "tool results too large (%d chars), truncating to %d chars per tool",
+                sum(len(r) for _, r in tool_results),
+                max_per_tool,
+            )
+            tool_results = [(n, _trim_tool_result(r, max_per_tool)) for n, r in tool_results]
+
+        cumulative_tool_chars += sum(len(r) for _, r in tool_results)
+        for name, result in tool_results:
             messages.append(Message(role="tool", tool_name=name, content=result))
 
     # Exceeded tool rounds: ask for a final answer without tools.
+    logger.info(
+        "max tool rounds exceeded, requesting final answer without tools (cumulative_tool_chars=%d)",
+        cumulative_tool_chars,
+    )
+    yield {
+        "type": "status",
+        "message": "ツール呼び出し上限に達しました。これまでの調査結果を整理中…",
+    }
+    messages.append(
+        Message(
+            role="user",
+            content=(
+                "ツール呼び出しの上限に達しました。これまでの検索結果と会話を元に、"
+                "ユーザーが求めた回答を最終的にまとめてください。"
+            ),
+        )
+    )
     try:
         resp = cast(Any, raw_client).chat(
             model=model,
@@ -158,6 +222,7 @@ def chat_with_tools(
             stream=False,
         )
     except Exception as exc:  # noqa: BLE001
+        logger.warning("final ollama chat call failed: %s", exc)
         yield {"type": "error", "message": str(exc)}
         return
     content = _assistant_content(resp)
@@ -167,6 +232,18 @@ def chat_with_tools(
     if content:
         yield {"type": "delta", "content": content}
     yield {"type": "done"}
+
+
+def _trim_tool_result(result: str, limit: int) -> str:
+    """Truncate ``result`` to ``limit`` chars while keeping it readable."""
+    if len(result) <= limit:
+        return result
+    # Prefer cutting at a paragraph boundary.
+    cutoff = result[:limit].rsplit("\n\n", 1)[0]
+    if len(cutoff) < limit * 0.5:
+        # No good paragraph boundary; cut at a space instead.
+        cutoff = result[:limit].rsplit(" ", 1)[0]
+    return cutoff + "\n\n…[tool result truncated]"
 
 
 def stream_chat_with_tools(
@@ -183,15 +260,31 @@ def stream_chat_with_tools(
     events are emitted inline so the UI can render them inside the assistant
     message.
     """
+    import logging
+    import time
+
+    logger = logging.getLogger("ollama_web.llm")
+
     raw_client = get_client(host)
     reg = registry or default_registry()
     tools: list[ToolCallable] = [cast(Any, c) for c in reg.callables]
+
+    cumulative_tool_chars = 0
 
     rounds = 0
     while rounds < MAX_TOOL_ROUNDS:
         rounds += 1
         full_message: dict[str, Any] = {"role": "assistant", "content": "", "thinking": ""}
         tool_calls: list[dict[str, Any]] = []
+        logger.info(
+            "tool round %d/%d start messages=%d model=%s cumulative_tool_chars=%d",
+            rounds,
+            MAX_TOOL_ROUNDS,
+            len(messages),
+            model,
+            cumulative_tool_chars,
+        )
+        t0 = time.time()
         try:
             stream = cast(Any, raw_client).chat(
                 model=model,
@@ -201,10 +294,13 @@ def stream_chat_with_tools(
                 stream=True,
             )
         except Exception as exc:  # noqa: BLE001
+            logger.warning("ollama chat call failed in %.2fs: %s", time.time() - t0, exc)
             yield {"type": "error", "message": str(exc)}
             return
 
+        chunk_count = 0
         for chunk in stream:
+            chunk_count += 1
             thinking = _assistant_thinking(chunk)
             if thinking:
                 full_message.setdefault("thinking", "")
@@ -221,6 +317,13 @@ def stream_chat_with_tools(
                 if c not in tool_calls:
                     tool_calls.append(c)
 
+        logger.info(
+            "ollama stream finished round=%d chunks=%d elapsed=%.2fs",
+            rounds,
+            chunk_count,
+            time.time() - t0,
+        )
+
         # Reconstruct the assistant message including any tool_calls so the
         # next round can see them.
         if tool_calls:
@@ -233,17 +336,67 @@ def stream_chat_with_tools(
             yield {"type": "done"}
             return
 
+        logger.info("executing %d tool call(s) round=%d", len(tool_calls), rounds)
+        tool_results: list[tuple[str, str]] = []
+        total_result_len = 0
         for call in tool_calls:
             name = call.get("name", "")
             args = call.get("arguments", {})
             yield {"type": "tool_start", "name": name, "arguments": args}
-            result = reg.execute(
-                name, args if isinstance(args, dict) else json.dumps(args)
-            )
+            t1 = time.time()
+            try:
+                result = reg.execute(
+                    name, args if isinstance(args, dict) else json.dumps(args)
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("tool %s execution failed in %.2fs: %s", name, time.time() - t1, exc)
+                result = f"Tool execution failed: {exc}"
+            # Always truncate per-tool result immediately so it does not bloat
+            # the context even before we reach the cumulative limit.
+            result = _trim_tool_result(result, settings.max_tool_result_chars)
+            logger.info("tool %s executed len=%d elapsed=%.2fs", name, len(result), time.time() - t1)
             yield {"type": "tool_end", "name": name, "result": result}
+            tool_results.append((name, result))
+            total_result_len += len(result)
+
+        # If the accumulated tool results are still too large, truncate each
+        # one more aggressively to keep ollama's context processing fast.
+        if total_result_len > MAX_TOOL_CONTEXT_CHARS:
+            budget = MAX_TOOL_CONTEXT_CHARS - len(tool_results) * 200  # reserve footer per tool
+            max_per_tool = budget // max(1, len(tool_results))
+            logger.warning(
+                "tool results too large (%d chars), truncating to %d chars per tool",
+                total_result_len,
+                max_per_tool,
+            )
+            trimmed_results: list[tuple[str, str]] = []
+            for name, result in tool_results:
+                trimmed_results.append((name, _trim_tool_result(result, max_per_tool)))
+            tool_results = trimmed_results
+
+        cumulative_tool_chars += sum(len(r) for _, r in tool_results)
+        for name, result in tool_results:
             messages.append(Message(role="tool", tool_name=name, content=result))
 
     # Exceeded tool rounds: ask for a final answer without tools.
+    logger.info(
+        "max tool rounds exceeded, requesting final answer without tools (cumulative_tool_chars=%d)",
+        cumulative_tool_chars,
+    )
+    yield {
+        "type": "status",
+        "message": "ツール呼び出し上限に達しました。これまでの調査結果を整理中…",
+    }
+    messages.append(
+        Message(
+            role="user",
+            content=(
+                "ツール呼び出しの上限に達しました。これまでの検索結果と会話を元に、"
+                "ユーザーが求めた回答を最終的にまとめてください。"
+            ),
+        )
+    )
+    t0 = time.time()
     try:
         stream = cast(Any, raw_client).chat(
             model=model,
@@ -252,9 +405,11 @@ def stream_chat_with_tools(
             stream=True,
         )
     except Exception as exc:  # noqa: BLE001
+        logger.warning("final ollama chat call failed in %.2fs: %s", time.time() - t0, exc)
         yield {"type": "error", "message": str(exc)}
         return
 
+    logger.info("streaming final answer")
     for chunk in stream:
         thinking = _assistant_thinking(chunk)
         if thinking:
@@ -262,6 +417,7 @@ def stream_chat_with_tools(
         content = _assistant_content(chunk)
         if content:
             yield {"type": "delta", "content": content}
+    logger.info("final answer stream finished elapsed=%.2fs", time.time() - t0)
     yield {"type": "done"}
 
 
@@ -285,7 +441,7 @@ async def astream_chat_with_tools(
             return None
 
     while True:
-        event = await anyio.to_thread.run_sync(_next)
+        event = await anyio.to_thread.run_sync(_next, abandon_on_cancel=True)
         if event is None:
             break
         yield event

@@ -174,3 +174,4 @@ data/
 # other
 .ruff_cache
 *.lock
+*.err
