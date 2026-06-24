@@ -314,3 +314,24 @@ class SessionStore:
             return abs_path.read_bytes()
         except Exception:  # noqa: BLE001
             return None
+
+    def clear_messages(self, session_id: str) -> dict[str, Any] | None:
+        """Clear all messages and attached files from the session."""
+        if not is_valid_id(session_id):
+            return None
+        session = self.get(session_id)
+        if session is None:
+            return None
+        # Remove uploaded/fetched physical files.
+        files_dir = self._files_dir(session_id)
+        try:
+            if files_dir.exists():
+                shutil.rmtree(files_dir)
+                files_dir.mkdir(parents=True, exist_ok=True)
+        except Exception:  # noqa: BLE001
+            pass
+        session["messages"] = []
+        session["files"] = []
+        session["updated_at"] = _now()
+        self._save(session_id, session)
+        return session

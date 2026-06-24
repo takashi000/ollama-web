@@ -33,6 +33,12 @@ def create_app() -> Starlette:
         Route("/", pages_route.index, name="index"),
         Route("/api/chat", chat_route.chat, methods=["POST"], name="chat"),
         Route("/api/models", models_route.get_models, methods=["GET"], name="models"),
+        Route(
+            "/api/models/{model}/capabilities",
+            models_route.get_model_capabilities,
+            methods=["GET"],
+            name="model_capabilities",
+        ),
         Route("/api/health", models_route.health, methods=["GET"], name="health"),
         Route("/api/sessions", sessions_route.list_sessions, methods=["GET"], name="list_sessions"),
         Route(
@@ -64,6 +70,12 @@ def create_app() -> Starlette:
             sessions_route.delete_file,
             methods=["DELETE"],
             name="delete_file",
+        ),
+        Route(
+            "/api/sessions/{session_id}/messages",
+            sessions_route.clear_messages,
+            methods=["DELETE"],
+            name="clear_messages",
         ),
         Mount("/static", app=StaticFiles(directory=str(_STATIC_DIR)), name="static"),
     ]

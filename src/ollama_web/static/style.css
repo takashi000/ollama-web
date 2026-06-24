@@ -333,6 +333,16 @@ button { cursor: pointer; }
 button:hover { border-color: var(--accent); }
 
 .think-toggle { display: flex; align-items: center; gap: 4px; color: var(--muted); }
+.think-toggle.disabled,
+.think-toggle:has(input:disabled) {
+  color: var(--muted);
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.think-toggle.disabled input[type="checkbox"],
+.think-toggle:has(input:disabled) input[type="checkbox"] {
+  cursor: not-allowed;
+}
 
 main#chat {
   flex: 1;

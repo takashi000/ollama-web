@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 from collections.abc import AsyncIterator, Callable, Iterator
 from typing import Any, cast
@@ -18,6 +19,7 @@ from .tools.registry import ToolRegistry, default_registry
 MAX_TOOL_ROUNDS = 5
 
 # Upper bound on the cumulative size of tool results sent back to ollama.
+
 # Larger values can cause ollama to spend a very long time processing the
 # context between rounds.
 MAX_TOOL_CONTEXT_CHARS = 24000
@@ -53,6 +55,65 @@ def list_models(host: str | None = None) -> list[str]:
         if name:
             models.append(str(name))
     return models
+
+
+def get_model_capabilities(model: str, host: str | None = None) -> set[str]:
+    """Return the capability set for a single model via ``ollama.show()``.
+
+    Unknown or unreachable models are treated as having no special capabilities,
+    which keeps the UI conservative and avoids sending unsupported parameters.
+    """
+    try:
+        client = get_client(host)
+        show_response = client.show(model)
+    except Exception:  # noqa: BLE001
+        return set()
+
+    caps = getattr(show_response, "capabilities", None)
+    if caps is None and isinstance(show_response, dict):
+        caps = show_response.get("capabilities")
+    if not caps:
+        return set()
+    return {str(c).lower() for c in caps}
+
+
+def _is_image_message(message: Message) -> bool:
+    """Check whether a message has image attachments."""
+    images = getattr(message, "images", None)
+    return bool(images)
+
+
+def _embed_images_in_content(message: Message) -> Message:
+    """Convert image bytes attached to a message into base64 markdown links.
+
+    Non-vision models cannot consume the ``images`` field, so we fall back to
+    embedding the image as data URIs inside the text content.
+    """
+    images = getattr(message, "images", None) or []
+    if not images:
+        return message
+
+    parts: list[str] = []
+    for img in images:
+        raw = getattr(img, "value", None) or (img if isinstance(img, (bytes, bytearray)) else None)
+        if raw is None:
+            continue
+        encoded = base64.b64encode(bytes(raw)).decode("ascii")
+        # Use a generic data URI since ollama already processed the image.
+        parts.append(f"![image](data:image/png;base64,{encoded})")
+
+    content = str(getattr(message, "content", "") or "")
+    if parts:
+        content = content + "\n\n" + "\n\n".join(parts)
+
+    kwargs: dict[str, Any] = {"role": getattr(message, "role", "user"), "content": content}
+    for attr in ("name", "tool_calls", "tool_name"):
+        value = getattr(message, attr, None)
+        if value is not None:
+            kwargs[attr] = value
+    if getattr(message, "thinking", None):
+        kwargs["thinking"] = message.thinking
+    return Message(**kwargs)
 
 
 def _tool_calls(response: Any) -> list[dict[str, Any]]:
@@ -108,6 +169,7 @@ def chat_with_tools(
     think: bool | str | None = None,
     registry: ToolRegistry | None = None,
     host: str | None = None,
+    capabilities: set[str] | None = None,
 ) -> Iterator[dict[str, Any]]:
     """Run a multi-round tool-calling chat and yield progress events.
 
@@ -126,9 +188,16 @@ def chat_with_tools(
 
     logger = logging.getLogger("ollama_web.llm")
 
+    caps = capabilities or set()
     raw_client = get_client(host)
     reg = registry or default_registry()
     tools: list[ToolCallable] = [cast(Any, c) for c in reg.callables]
+    effective_tools = tools if "tools" in caps else []
+    effective_think = think if "thinking" in caps else None
+
+    # Non-vision models cannot use the ``images`` field; embed them as base64.
+    if "vision" not in caps:
+        messages = [_embed_images_in_content(m) if _is_image_message(m) else m for m in messages]
 
     cumulative_tool_chars = 0
 
@@ -147,8 +216,8 @@ def chat_with_tools(
             resp = cast(Any, raw_client).chat(
                 model=model,
                 messages=messages,
-                tools=tools,
-                think=think,
+                tools=effective_tools,
+                think=effective_think,
                 stream=False,
             )
         except Exception as exc:  # noqa: BLE001
@@ -221,7 +290,8 @@ def chat_with_tools(
         resp = cast(Any, raw_client).chat(
             model=model,
             messages=messages,
-            think=think,
+            tools=effective_tools,
+            think=effective_think,
             stream=False,
         )
     except Exception as exc:  # noqa: BLE001
@@ -256,6 +326,7 @@ def stream_chat_with_tools(
     think: bool | str | None = None,
     registry: ToolRegistry | None = None,
     host: str | None = None,
+    capabilities: set[str] | None = None,
 ) -> Iterator[dict[str, Any]]:
     """Run a tool-calling chat loop and yield real streaming events from ollama.
 
@@ -268,9 +339,16 @@ def stream_chat_with_tools(
 
     logger = logging.getLogger("ollama_web.llm")
 
+    caps = capabilities or set()
     raw_client = get_client(host)
     reg = registry or default_registry()
     tools: list[ToolCallable] = [cast(Any, c) for c in reg.callables]
+    effective_tools = tools if "tools" in caps else []
+    effective_think = think if "thinking" in caps else None
+
+    # Non-vision models cannot use the ``images`` field; embed them as base64.
+    if "vision" not in caps:
+        messages = [_embed_images_in_content(m) if _is_image_message(m) else m for m in messages]
 
     cumulative_tool_chars = 0
 
@@ -292,8 +370,8 @@ def stream_chat_with_tools(
             stream = cast(Any, raw_client).chat(
                 model=model,
                 messages=messages,
-                tools=tools,
-                think=think,
+                tools=effective_tools,
+                think=effective_think,
                 stream=True,
             )
         except Exception as exc:  # noqa: BLE001
@@ -412,7 +490,8 @@ def stream_chat_with_tools(
         stream = cast(Any, raw_client).chat(
             model=model,
             messages=messages,
-            think=think,
+            tools=effective_tools,
+            think=effective_think,
             stream=True,
         )
     except Exception as exc:  # noqa: BLE001
@@ -439,11 +518,14 @@ async def astream_chat_with_tools(
     think: bool | str | None = None,
     registry: ToolRegistry | None = None,
     host: str | None = None,
+    capabilities: set[str] | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
     """Async wrapper that yields events from ``stream_chat_with_tools``."""
     import anyio
 
-    gen = stream_chat_with_tools(messages, model, think=think, registry=registry, host=host)
+    gen = stream_chat_with_tools(
+        messages, model, think=think, registry=registry, host=host, capabilities=capabilities
+    )
 
     def _next() -> dict[str, Any] | None:
         try:

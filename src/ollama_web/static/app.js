@@ -21,6 +21,34 @@ let currentSessionId = null;
 let currentSession = null;
 let pendingFiles = [];
 let abortController = null;
+let currentCapabilities = new Set();
+
+function updateThinkToggleState() {
+  if (!thinkToggle) return;
+  if (currentCapabilities.has("thinking")) {
+    thinkToggle.disabled = false;
+    thinkToggle.parentElement.classList.remove("disabled");
+  } else {
+    thinkToggle.disabled = true;
+    thinkToggle.checked = false;
+    thinkToggle.parentElement.classList.add("disabled");
+  }
+}
+
+async function loadModelCapabilities() {
+  const model = modelSelect.value;
+  if (!model) return;
+  try {
+    const res = await fetch(`/api/models/${encodeURIComponent(model)}/capabilities`);
+    if (!res.ok) throw new Error(res.statusText);
+    const data = await res.json();
+    currentCapabilities = new Set((data.capabilities || []).map((c) => c.toLowerCase()));
+  } catch (err) {
+    console.error("failed to load model capabilities", err);
+    currentCapabilities = new Set();
+  }
+  updateThinkToggleState();
+}
 
 function getCookie(name) {
   const prefix = `${name}=`;
@@ -440,6 +468,8 @@ sessionListEl.addEventListener("click", (e) => {
   }
 });
 
+modelSelect.addEventListener("change", loadModelCapabilities);
+
 async function send() {
   const text = inputEl.value.trim();
   if (!text && !pendingFiles.length) return;
@@ -669,9 +699,36 @@ inputEl.addEventListener("keydown", (e) => {
   }
 });
 
-clearBtn.addEventListener("click", () => {
-  chatEl.innerHTML = "";
-});
+async function clearMessages() {
+  if (!currentSessionId) {
+    chatEl.innerHTML = "";
+    pendingFiles = [];
+    renderAttachments();
+    return;
+  }
+
+  try {
+    const res = await csrfFetch(`/api/sessions/${currentSessionId}/messages`, {
+      method: "DELETE",
+    });
+    if (!res.ok) throw new Error(res.statusText);
+    const data = await res.json();
+    if (!data.cleared) throw new Error("クリアに失敗しました");
+
+    if (currentSession) {
+      currentSession.messages = [];
+      currentSession.files = [];
+    }
+    pendingFiles = [];
+    chatEl.innerHTML = "";
+    renderAttachments();
+  } catch (err) {
+    console.error("failed to clear messages", err);
+    alert("メッセージのクリアに失敗しました");
+  }
+}
+
+clearBtn.addEventListener("click", clearMessages);
 
 cancelBtn.addEventListener("click", () => {
   if (abortController) {
@@ -680,3 +737,4 @@ cancelBtn.addEventListener("click", () => {
 });
 
 loadSessions();
+loadModelCapabilities();

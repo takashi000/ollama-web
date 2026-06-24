@@ -161,3 +161,14 @@ async def delete_file(request: Request) -> JSONResponse:
     if not ok:
         return JSONResponse({"error": "File not found"}, status_code=404)
     return JSONResponse({"deleted": True})
+
+
+async def clear_messages(request: Request) -> JSONResponse:
+    store = _get_store(request)
+    session_id = request.path_params["session_id"]
+    if not is_valid_id(session_id):
+        return JSONResponse({"error": "Invalid session id"}, status_code=400)
+    session = store.clear_messages(session_id)
+    if session is None:
+        return JSONResponse({"error": "Session not found"}, status_code=404)
+    return JSONResponse({"cleared": True, "session": session})

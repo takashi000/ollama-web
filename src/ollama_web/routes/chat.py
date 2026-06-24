@@ -202,8 +202,16 @@ async def _chat_event_stream(
             total_image_bytes,
         )
 
+        capabilities = llm.get_model_capabilities(model, host=host)
+        logger.info(
+            "chat stream model=%s capabilities=%s",
+            model,
+            sorted(capabilities),
+        )
+
         async for event in llm.astream_chat_with_tools(
-            messages, model, think=think, host=host, registry=registry
+            messages, model, think=think, host=host, registry=registry,
+            capabilities=capabilities,
         ):
             if event.get("type") == "delta":
                 assistant_text = _limit_text(
