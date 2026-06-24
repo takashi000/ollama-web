@@ -28,16 +28,67 @@ function simpleMarkdownToHtml(text) {
   return el.outerHTML;
 }
 
+function protectMath(text) {
+  const placeholders = [];
+  const store = (display, latex) => {
+    const id = `MATH_PLACEHOLDER_${placeholders.length}_`;
+    placeholders.push({ id, display, latex });
+    return id;
+  };
+  const processed = text
+    .replace(/(?<!\$)\$\$([\s\S]+?)\$\$(?!\$)/g, (_, latex) => store(true, latex))
+    .replace(/(?<!\$)\$((?:\\.|[^\\\n$])+?)\$(?!\$)/g, (_, latex) => store(false, latex))
+    .replace(/(?<!\S)\\\[([\s\S]+?)\\\](?!\S)/g, (_, latex) => store(true, latex))
+    .replace(/(?<!\S)\\\(((?:\\.|[^\\\n])+?)\\\)(?!\S)/g, (_, latex) => store(false, latex));
+  return { text: processed, placeholders };
+}
+
+function escapeHtmlMath(latex) {
+  return latex
+    .replace(/&/g, String.fromCharCode(38, 97, 109, 112, 59))
+    .replace(/</g, String.fromCharCode(38, 108, 116, 59))
+    .replace(/>/g, String.fromCharCode(38, 103, 116, 59));
+}
+
+function restoreMath(html, placeholders) {
+  let out = html;
+  for (const { id, display, latex } of placeholders) {
+    const tag = display ? "div" : "span";
+    const cls = display ? "math-block" : "math-inline";
+    out = out.split(id).join(`<${tag} class="${cls}">${escapeHtmlMath(latex)}</${tag}>`);
+  }
+  return out;
+}
+
 function renderMarkdown(text) {
   if (typeof marked !== "undefined" && marked.parse) {
     try {
-      const html = marked.parse(text);
-      if (typeof html === "string") return html;
+      const { text: protectedText, placeholders } = protectMath(text);
+      const html = marked.parse(protectedText);
+      if (typeof html === "string") return restoreMath(html, placeholders);
     } catch {
       // fall through
     }
   }
   return simpleMarkdownToHtml(text);
+}
+
+function renderMathIn(el) {
+  if (typeof katex === "undefined" || !katex.render) return;
+  el.querySelectorAll(".math-inline").forEach((node) => {
+    try {
+      katex.render(node.textContent, node, { throwOnError: false, displayMode: false });
+    } catch {
+      /* ignore */
+    }
+  });
+  el.querySelectorAll(".math-block").forEach((node) => {
+    try {
+      katex.render(node.textContent, node, { throwOnError: false, displayMode: true });
+    } catch {
+      /* ignore */
+    }
+  });
 }
 
 function highlightIn(el) {
@@ -242,6 +293,7 @@ function _renderAssistantContent(body, content) {
   } else {
     body.innerHTML = renderMarkdown(content);
     highlightIn(body);
+    renderMathIn(body);
   }
 }
 
@@ -255,6 +307,7 @@ function renderSession() {
       const content = m.content || "";
       body.innerHTML = renderMarkdown(content);
       highlightIn(body);
+      renderMathIn(body);
       if (m.attachments && m.attachments.length) {
         const info = document.createElement("div");
         info.style.fontSize = "12px";
@@ -444,6 +497,7 @@ async function send() {
     assistantText += content;
     assistantBody.innerHTML = renderMarkdown(assistantText);
     highlightIn(assistantBody);
+    renderMathIn(assistantBody);
     chatEl.scrollTop = chatEl.scrollHeight;
   }
 
@@ -539,6 +593,7 @@ async function send() {
     if (assistantText) {
       assistantBody.innerHTML = renderMarkdown(assistantText);
       highlightIn(assistantBody);
+      renderMathIn(assistantBody);
     }
   }
 

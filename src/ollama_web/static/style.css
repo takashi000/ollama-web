@@ -365,6 +365,15 @@ main#chat {
 }
 
 .message code { font-family: "SFMono-Regular", Consolas, monospace; font-size: 13px; }
+
+.message .math-block {
+  margin: 12px 0;
+  overflow-x: auto;
+}
+
+.message .math-inline {
+  display: inline-block;
+}
 .message p { margin: 8px 0; }
 .message ul, .message ol { padding-left: 22px; }
 
