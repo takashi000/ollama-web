@@ -38,6 +38,12 @@ class Settings:
     allowed_origins: list[str] = field(
         default_factory=lambda: _csv_env("OLLAMA_WEB_ALLOWED_ORIGINS")
     )
+    mcp_stdio_allowlist: list[str] = field(
+        default_factory=lambda: _csv_env("OLLAMA_WEB_MCP_STDIO_ALLOWLIST")
+    )
+    mcp_https_allowlist: list[str] = field(
+        default_factory=lambda: _csv_env("OLLAMA_WEB_MCP_HTTPS_ALLOWLIST")
+    )
     ollama_timeout: float = 120.0
     scrape_timeout: float = 15.0
     scrape_max_chars: int = 4000

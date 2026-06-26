@@ -75,29 +75,48 @@ ollama-web
 | `OLLAMA_WEB_PIN` | 起動時に自動生成 | ログイン用 PIN |
 | `OLLAMA_WEB_SECRET_KEY` | 起動時に自動生成 | Cookie 署名鍵 |
 | `OLLAMA_WEB_ALLOWED_ORIGINS` | 未設定 | CORS 許可オリジンのカンマ区切り |
+| `OLLAMA_WEB_MCP_STDIO_ALLOWLIST` | 未設定 | stdio MCP で起動を許可する実行ファイル絶対パスのカンマ区切り |
+| `OLLAMA_WEB_MCP_HTTPS_ALLOWLIST` | 未設定 | remote HTTPS MCP 接続を許可するホスト名のカンマ区切り |
 
 ### MCP サーバー設定
 
 `data/mcpServers.json` に接続先 MCP サーバーを記述します。ブラウザの左ペイン下部「MCP設定」からも編集・保存できます。
 
-stdio サーバーの例：
+MCP は外部プログラムや外部サーバーの Tool を LLM へ公開する機能です。安全のため、登録できるサーバーと自動実行できる Tool には制限があります。
+
+#### stdio MCP を使う場合
+
+stdio MCP は既定では起動できません。`command` に指定する実行ファイルの絶対パスを、先に `OLLAMA_WEB_MCP_STDIO_ALLOWLIST` へ登録してください。
+
+PowerShell の例：
+
+```powershell
+$env:OLLAMA_WEB_MCP_STDIO_ALLOWLIST = "C:\Users\you\src\python\ollama-web\.venv\Scripts\python.exe"
+ollama-web
+```
+
+`mcpServers.json` の例：
 
 ```json
 {
   "mcpServers": {
     "calc": {
-      "command": "python",
-      "args": ["scripts/calc_server.py"]
-    },
-    "echo": {
-      "command": "python",
-      "args": ["scripts/echo_server.py"]
+      "command": "C:\\Users\\you\\src\\python\\ollama-web\\.venv\\Scripts\\python.exe",
+      "args": ["mcp_servers/calc_server.py"]
     }
   }
 }
 ```
 
-Streamable HTTP サーバーの例：
+`OLLAMA_WEB_MCP_STDIO_ALLOWLIST` で許可するのは、`args` に渡すスクリプトではなく `command` の実行ファイルです。たとえば `python.exe` で `data/mcp_servers/my_server.py` を起動する場合も、allowlist へ登録するのは `python.exe` の絶対パスです。
+
+MCP server プログラム本体は `OLLAMA_WEB_DATA_DIR` 配下に配置してください。既定では `data/mcp_servers/` などです。`cwd` 未指定時は `OLLAMA_WEB_DATA_DIR` が作業ディレクトリになるため、上の例の `args` は `data/mcp_servers/calc_server.py` を指します。
+
+`cwd` を明示する場合も、`OLLAMA_WEB_DATA_DIR` 配下のみ指定できます。`scripts/` 配下のファイルは開発・動作確認用のサンプルです。実際のMCP設定では、必要なサーバープログラムを `data/mcp_servers/` などへ配置してから指定してください。
+
+#### Streamable HTTP MCP を使う場合
+
+ローカルの HTTP MCP は `http://127.0.0.1` または `http://localhost` のみ許可されます。
 
 ```json
 {
@@ -113,7 +132,38 @@ Streamable HTTP サーバーの例：
 }
 ```
 
-`scripts/` 以下には動作確認用の MCP サーバーが用意されています。
+remote HTTPS MCP を使う場合は、接続先ホスト名を `OLLAMA_WEB_MCP_HTTPS_ALLOWLIST` に登録してください。
+
+```powershell
+$env:OLLAMA_WEB_MCP_HTTPS_ALLOWLIST = "mcp.example.com"
+ollama-web
+```
+
+```json
+{
+  "mcpServers": {
+    "remote_calc": {
+      "url": "https://mcp.example.com/mcp",
+      "headers": {
+        "Authorization": "Bearer optional-token"
+      }
+    }
+  }
+}
+```
+
+plain HTTP のリモートサーバー、private IP、metadata IP は拒否されます。
+
+#### MCP Tool 名と secret の扱い
+
+Server 名と Tool 名には英数字、`_`、`-` のみ使えます。`__` は内部の名前空間区切りとして使うため指定できません。
+
+Tool 名に `delete`、`write`、`run`、`shell`、`secret` など危険操作を示す語が含まれる場合、その Tool は確認なしには実行されません。現時点では UI の承認フローはなく、該当 Tool は拒否されます。
+
+MCP 設定 API の GET 応答では、`env` / `headers` 内の secret らしい値は `***` にマスクされます。Tool の実行結果やエラーも LLM へ渡す前に不信データとして隔離されます。
+
+`scripts/` 以下には動作確認用の MCP サーバーが用意されています。実際にWeb UIからstdio MCPとして登録する場合は、使いたいサーバープログラムを `data/mcp_servers/` など `OLLAMA_WEB_DATA_DIR` 配下へ配置してから設定してください。
+次のコマンドは開発者がターミナルで直接動かす確認用です。`scripts/` 配下のファイルをそのまま `mcpServers.json` のstdio設定に指定しても、Web UIからは起動できません。
 
 ```bash
 # stdio モードで起動
@@ -124,12 +174,6 @@ python scripts/calc_server.py streamable-http
 
 # ポートを明示して起動（ollama-web の 8000 と衝突しないように）
 python scripts/calc_server.py streamable-http 9001
-```
-
-テスト用 MCP サーバーは `scripts/test_stdio_servers.py` で一括動作確認できます。
-
-```bash
-python scripts/test_stdio_servers.py
 ```
 
 対応パラメータ：
@@ -146,6 +190,7 @@ python scripts/test_stdio_servers.py
 - `OLLAMA_WEB_PIN` 未設定時の PIN は起動ごとに変わります。継続利用する場合は固定値を設定してください。
 - CORS は既定で無効です。外部オリジンから API を呼ぶ必要がある場合のみ `OLLAMA_WEB_ALLOWED_ORIGINS` を設定してください。
 - Web 取得系ツールは localhost/private IP/metadata IP へのアクセスを拒否します。
+- MCP の stdio transport は allowlist 未設定では拒否されます。Tool 名や Server 名は安全な英数字/`_`/`-` のみ許可され、危険名の MCP Tool は確認なしには実行されません。
 
 ## Development
 

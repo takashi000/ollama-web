@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 import tempfile
 from pathlib import Path
 
@@ -25,6 +26,8 @@ def client(monkeypatch):
     monkeypatch.setattr(settings, "pin", "123456")
     monkeypatch.setattr(settings, "secret_key", "test-secret")
     monkeypatch.setattr(settings, "allowed_origins", [])
+    monkeypatch.setattr(settings, "mcp_stdio_allowlist", [sys.executable])
+    monkeypatch.setattr(settings, "mcp_https_allowlist", [])
     with tempfile.TemporaryDirectory() as tmp:
         monkeypatch.setattr(settings, "data_dir", tmp)
         client = TestClient(create_app())
@@ -67,8 +70,11 @@ def test_mcp_config_api(client):
 
     payload = {
         "mcpServers": {
-            "fs": {"command": "npx", "args": ["-y", "server"]},
-            "remote": {"url": "https://example.com/mcp", "timeout": 60},
+            "fs": {
+                "command": sys.executable,
+                "args": ["mcp_servers/calc_server.py"],
+            },
+            "remote": {"url": "http://127.0.0.1:9000/mcp", "timeout": 60},
         }
     }
     res = client.put(
@@ -78,7 +84,7 @@ def test_mcp_config_api(client):
     )
     assert res.status_code == 200
     data = res.json()
-    assert data["mcpServers"]["fs"]["command"] == "npx"
+    assert data["mcpServers"]["fs"]["command"] == sys.executable
     assert data["mcpServers"]["remote"]["timeout"] == 60.0
 
     res = client.get("/api/mcp/servers")

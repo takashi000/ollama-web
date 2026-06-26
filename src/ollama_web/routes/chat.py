@@ -90,7 +90,10 @@ async def _build_registry(session_id: str | None) -> ToolRegistry:
             name = fn.get("name")
             if not name:
                 continue
-            reg.register_mcp_tool(name, tool_def, executor)
+            try:
+                reg.register_mcp_tool(name, tool_def, executor)
+            except ValueError as exc:
+                logger.warning("skipping duplicate MCP tool %s: %s", name, exc)
 
     return reg
 

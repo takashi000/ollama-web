@@ -11,6 +11,7 @@ import ollama
 from ollama import Message
 
 from .config import settings
+from .mcp import is_dangerous_mcp_tool, redact_secrets
 from .tools.registry import ToolRegistry, default_registry
 
 # Maximum successive tool-call rounds before we force a final answer.
@@ -26,6 +27,25 @@ MAX_TOOL_CONTEXT_CHARS = 24000
 
 # Type alias matching ollama's expected tools signature.
 ToolCallable = Callable[..., Any]
+
+
+def _safe_tool_arguments(arguments: Any) -> Any:
+    return redact_secrets(arguments)
+
+
+def _safe_tool_result(result: str) -> str:
+    redacted = redact_secrets(result)
+    return str(redacted)
+
+
+def _execute_tool_with_policy(
+    reg: ToolRegistry,
+    name: str,
+    args: Any,
+) -> str:
+    if is_dangerous_mcp_tool(name):
+        return json.dumps({"error": "MCP tool requires explicit approval"}, ensure_ascii=False)
+    return reg.execute(name, args if isinstance(args, dict) else json.dumps(args))
 
 
 def get_client(host: str | None = None) -> ollama.Client:
@@ -245,9 +265,9 @@ def chat_with_tools(
         for call in calls:
             name = call.get("name", "")
             args = call.get("arguments", {})
-            yield {"type": "tool_start", "name": name, "arguments": args}
-            result = reg.execute(name, args if isinstance(args, dict) else json.dumps(args))
-            result = _trim_tool_result(result, settings.max_tool_result_chars)
+            yield {"type": "tool_start", "name": name, "arguments": _safe_tool_arguments(args)}
+            result = _execute_tool_with_policy(reg, name, args)
+            result = _safe_tool_result(_trim_tool_result(result, settings.max_tool_result_chars))
             yield {"type": "tool_end", "name": name, "result": result}
             tool_results.append((name, result))
 
@@ -423,18 +443,16 @@ def stream_chat_with_tools(
         for call in tool_calls:
             name = call.get("name", "")
             args = call.get("arguments", {})
-            yield {"type": "tool_start", "name": name, "arguments": args}
+            yield {"type": "tool_start", "name": name, "arguments": _safe_tool_arguments(args)}
             t1 = time.time()
             try:
-                result = reg.execute(
-                    name, args if isinstance(args, dict) else json.dumps(args)
-                )
+                result = _execute_tool_with_policy(reg, name, args)
             except Exception as exc:  # noqa: BLE001
                 logger.warning("tool %s execution failed in %.2fs: %s", name, time.time() - t1, exc)
                 result = f"Tool execution failed: {exc}"
             # Always truncate per-tool result immediately so it does not bloat
             # the context even before we reach the cumulative limit.
-            result = _trim_tool_result(result, settings.max_tool_result_chars)
+            result = _safe_tool_result(_trim_tool_result(result, settings.max_tool_result_chars))
             logger.info(
                 "tool %s executed len=%d elapsed=%.2fs",
                 name,

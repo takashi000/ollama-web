@@ -40,10 +40,14 @@ class ToolRegistry:
           executor: A callable that accepts ``(full_name, arguments)`` and
             returns a JSON-encoded result string.
         """
+        if name in self._tools:
+            raise ValueError(f"Duplicate tool name: {name}")
         self._tools[name] = executor
         self._mcp_tool_names.add(name)
         # Avoid duplicate definitions if a registry is rebuilt.
-        self._ollama_tool_defs = [d for d in self._ollama_tool_defs if d.get("name") != name]
+        self._ollama_tool_defs = [
+            d for d in self._ollama_tool_defs if d.get("function", {}).get("name") != name
+        ]
         self._ollama_tool_defs.append(tool_def)
         return executor
 
