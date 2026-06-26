@@ -38,8 +38,6 @@ _DANGEROUS_TOOL_WORDS = (
     "token",
     "secret",
 )
-_STDIO_INLINE_CODE_FLAGS = {"-c", "-m", "-e", "--eval"}
-_STDIO_SCRIPT_SUFFIXES = {".py", ".js", ".mjs", ".cjs", ".ts"}
 _SECRET_KEY_RE = re.compile(r"(?i)(authorization|api[_-]?key|token|secret|cookie|session)")
 _SECRET_VALUE_PATTERNS = (
     re.compile(r"(?i)Bearer\s+[A-Za-z0-9._~+/=-]+"),
@@ -139,61 +137,28 @@ def _allowed_https_hosts() -> set[str]:
     return {host.lower() for host in settings.mcp_https_allowlist if host}
 
 
-def validate_stdio_server(server: dict[str, Any], data_dir: str | Path | None = None) -> None:
-    """Validate stdio MCP config before saving or launching."""
+def validate_stdio_server(server: dict[str, Any], _data_dir: str | Path | None = None) -> None:
+    """Validate stdio MCP config before saving or launching.
+
+    Only the executable command itself is restricted by the allowlist.  ``cwd``
+    and ``args`` follow the standard MCP stdio shape without additional path
+    sandboxing, so arbitrary working directories and script/argument paths can
+    be used.
+    """
     command = Path(str(server.get("command", ""))).resolve()
     if str(command) not in _allowed_stdio_commands():
         raise ValueError("stdio MCP command is not allowlisted")
 
-    root = Path(data_dir or settings.data_dir).resolve()
-    cwd_path = _resolve_stdio_cwd(server.get("cwd"), root)
-    _validate_stdio_args(server.get("args", []), cwd_path, root)
 
+def _resolve_stdio_cwd(cwd: Any) -> str | None:
+    """Return a stdio working directory path.
 
-def _resolve_stdio_cwd(cwd: Any, root: Path | None = None) -> Path:
-    data_root = (root or Path(settings.data_dir)).resolve()
+    ``None`` means the subprocess should use the current process working
+    directory, matching common MCP stdio behaviour.
+    """
     if not cwd:
-        return data_root
-
-    path = Path(str(cwd))
-    cwd_path = path.resolve() if path.is_absolute() else (data_root / path).resolve()
-    try:
-        cwd_path.relative_to(data_root)
-    except ValueError as exc:
-        raise ValueError("stdio MCP cwd must stay inside the data directory") from exc
-    return cwd_path
-
-
-def _validate_stdio_args(args: Any, cwd: Path, root: Path) -> None:
-    if not isinstance(args, list):
-        raise ValueError("stdio MCP args must be a list")
-
-    for raw_arg in args:
-        arg = str(raw_arg)
-        if arg in _STDIO_INLINE_CODE_FLAGS:
-            raise ValueError(f"stdio MCP inline/module execution is not allowed: {arg}")
-        if _looks_like_local_script_arg(arg):
-            target = Path(arg)
-            if not target.is_absolute():
-                target = cwd / target
-            try:
-                target.resolve().relative_to(root)
-            except ValueError as exc:
-                raise ValueError(
-                    "stdio MCP script arguments must stay inside the data directory"
-                ) from exc
-
-
-def _looks_like_local_script_arg(arg: str) -> bool:
-    if "://" in arg or arg.startswith("-"):
-        return False
-    path = Path(arg)
-    return (
-        path.suffix.lower() in _STDIO_SCRIPT_SUFFIXES
-        or "/" in arg
-        or "\\" in arg
-        or path.is_absolute()
-    )
+        return None
+    return str(Path(str(cwd)).resolve())
 
 
 def _is_local_http_host(host: str | None) -> bool:
@@ -402,7 +367,7 @@ async def _list_tools_stdio(
     command = str(server["command"])
     args = [str(a) for a in server.get("args", [])]
     env = server.get("env")
-    cwd = str(_resolve_stdio_cwd(server.get("cwd")))
+    cwd = _resolve_stdio_cwd(server.get("cwd"))
 
     params = StdioServerParameters(
         command=command,
@@ -535,7 +500,7 @@ async def _call_tool_stdio(
     command = str(server["command"])
     args = [str(a) for a in server.get("args", [])]
     env = server.get("env")
-    cwd = str(_resolve_stdio_cwd(server.get("cwd")))
+    cwd = _resolve_stdio_cwd(server.get("cwd"))
 
     params = StdioServerParameters(
         command=command,

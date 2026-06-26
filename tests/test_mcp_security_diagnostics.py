@@ -108,111 +108,17 @@ def test_diagnostic_collect_mcp_tools_launches_configured_stdio_process() -> Non
         assert not marker.exists()
 
 
-def test_diagnostic_stdio_rejects_script_args_outside_data_dir(
+def test_diagnostic_stdio_accepts_arbitrary_cwd_and_args(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(settings, "mcp_stdio_allowlist", [sys.executable])
-    repo_script = Path("scripts/calc_server.py").resolve()
-    payload = {
-        "mcpServers": {
-            "repo_script": {
-                "command": sys.executable,
-                "args": [str(repo_script)],
-            }
-        }
-    }
-
-    res = client.put(
-        "/api/mcp/servers",
-        json=payload,
-        headers={"X-CSRF-Token": _csrf(client)},
-    )
-
-    assert res.status_code == 400
-    assert "script arguments must stay inside the data directory" in json.dumps(res.json())
-
-
-def test_diagnostic_stdio_allows_script_args_inside_data_dir(
-    client: TestClient,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(settings, "mcp_stdio_allowlist", [sys.executable])
-    payload = {
-        "mcpServers": {
-            "data_script": {
-                "command": sys.executable,
-                "args": ["mcp_servers/calc_server.py"],
-            }
-        }
-    }
-
-    res = client.put(
-        "/api/mcp/servers",
-        json=payload,
-        headers={"X-CSRF-Token": _csrf(client)},
-    )
-
-    assert res.status_code == 200
-
-
-def test_diagnostic_stdio_defaults_cwd_to_data_dir(
-    client: TestClient,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(settings, "mcp_stdio_allowlist", [sys.executable])
-    payload = {
-        "mcpServers": {
-            "data_script": {
-                "command": sys.executable,
-                "args": ["mcp_servers/calc_server.py"],
-            }
-        }
-    }
-
-    res = client.put(
-        "/api/mcp/servers",
-        json=payload,
-        headers={"X-CSRF-Token": _csrf(client)},
-    )
-
-    assert res.status_code == 200
-
-
-def test_diagnostic_stdio_resolves_relative_cwd_from_data_dir(
-    client: TestClient,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(settings, "mcp_stdio_allowlist", [sys.executable])
-    payload = {
-        "mcpServers": {
-            "nested_data_script": {
-                "command": sys.executable,
-                "args": ["calc_server.py"],
-                "cwd": "mcp_servers",
-            }
-        }
-    }
-
-    res = client.put(
-        "/api/mcp/servers",
-        json=payload,
-        headers={"X-CSRF-Token": _csrf(client)},
-    )
-
-    assert res.status_code == 200
-
-
-def test_diagnostic_stdio_rejects_relative_cwd_outside_data_dir(
-    client: TestClient,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+    """stdio cwd and args are not sandboxed; only the command allowlist matters."""
     monkeypatch.setattr(settings, "mcp_stdio_allowlist", [sys.executable])
     payload = {
         "mcpServers": {
             "outside": {
                 "command": sys.executable,
-                "args": ["calc_server.py"],
+                "args": ["-c", "print('not an mcp server file')"],
                 "cwd": "..",
             }
         }
@@ -224,21 +130,23 @@ def test_diagnostic_stdio_rejects_relative_cwd_outside_data_dir(
         headers={"X-CSRF-Token": _csrf(client)},
     )
 
-    assert res.status_code == 400
-    assert "cwd must stay inside the data directory" in json.dumps(res.json())
+    assert res.status_code == 200
+    server = res.json()["mcpServers"]["outside"]
+    assert server["cwd"] == ".."
+    assert server["args"] == ["-c", "print('not an mcp server file')"]
 
 
-def test_diagnostic_stdio_rejects_inline_python_execution(
+def test_diagnostic_stdio_omits_cwd_when_not_configured(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """If cwd is absent it is not forced to the data directory."""
     monkeypatch.setattr(settings, "mcp_stdio_allowlist", [sys.executable])
     payload = {
         "mcpServers": {
-            "inline_code": {
+            "no_cwd": {
                 "command": sys.executable,
-                "args": ["-c", "print('not an mcp server file')"],
-                "cwd": settings.data_dir,
+                "args": ["scripts/calc_server.py"],
             }
         }
     }
@@ -249,8 +157,8 @@ def test_diagnostic_stdio_rejects_inline_python_execution(
         headers={"X-CSRF-Token": _csrf(client)},
     )
 
-    assert res.status_code == 400
-    assert "inline/module execution is not allowed" in json.dumps(res.json())
+    assert res.status_code == 200
+    assert "cwd" not in res.json()["mcpServers"]["no_cwd"]
 
 
 def test_diagnostic_mcp_tool_metadata_is_limited_before_ollama() -> None:
