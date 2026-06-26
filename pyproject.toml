@@ -28,6 +28,7 @@ dependencies = [
     "pypdf>=4.0",
     "python-multipart>=0.0.9",
     "Pillow>=10.0",
+    "mcp>=1.6.0",
 ]
 
 [project.optional-dependencies]

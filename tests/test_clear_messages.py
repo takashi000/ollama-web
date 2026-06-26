@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import json
 import tempfile
-from pathlib import Path
 
 from ollama_web.sessions import SessionStore, is_valid_id
 

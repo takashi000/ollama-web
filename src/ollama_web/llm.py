@@ -191,7 +191,7 @@ def chat_with_tools(
     caps = capabilities or set()
     raw_client = get_client(host)
     reg = registry or default_registry()
-    tools: list[ToolCallable] = [cast(Any, c) for c in reg.callables]
+    tools: list[ToolCallable] = [cast(Any, t) for t in reg.ollama_tools]
     effective_tools = tools if "tools" in caps else []
     effective_think = think if "thinking" in caps else None
 
@@ -342,7 +342,7 @@ def stream_chat_with_tools(
     caps = capabilities or set()
     raw_client = get_client(host)
     reg = registry or default_registry()
-    tools: list[ToolCallable] = [cast(Any, c) for c in reg.callables]
+    tools: list[ToolCallable] = [cast(Any, t) for t in reg.ollama_tools]
     effective_tools = tools if "tools" in caps else []
     effective_think = think if "thinking" in caps else None
 

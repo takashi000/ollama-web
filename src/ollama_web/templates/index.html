@@ -19,6 +19,9 @@
       <button id="new-session-btn" type="button" title="新規セッション">＋</button>
     </div>
     <ul id="session-list"></ul>
+    <div class="sidebar-footer">
+      <button id="mcp-settings-btn" type="button">MCP設定</button>
+    </div>
   </aside>
   <div id="sidebar-backdrop"></div>
 
@@ -61,7 +64,25 @@
       </div>
     </form>
   </div>
+
+  <div id="mcp-modal" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2>MCPサーバー設定</h2>
+        <button id="mcp-modal-close" type="button" class="close-btn">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div id="mcp-servers"></div>
+        <button id="mcp-add-btn" type="button" class="secondary">＋ サーバー追加</button>
+      </div>
+      <div class="modal-footer">
+        <button id="mcp-save-btn" type="button">保存</button>
+      </div>
+    </div>
+  </div>
+
   <script src="{{ url_for('static', path='tools.js') }}"></script>
+  <script src="{{ url_for('static', path='mcp.js') }}"></script>
   <script src="{{ url_for('static', path='app.js') }}"></script>
 </body>
 </html>

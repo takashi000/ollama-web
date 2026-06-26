@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from starlette.applications import Starlette
@@ -15,6 +16,7 @@ from .config import settings
 from .middleware import SecurityHeadersMiddleware
 from .routes import auth as auth_route
 from .routes import chat as chat_route
+from .routes import mcp as mcp_route
 from .routes import models as models_route
 from .routes import pages as pages_route
 from .routes import sessions as sessions_route
@@ -25,6 +27,17 @@ _STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 def create_app() -> Starlette:
     """Build and return the configured Starlette application."""
+    # Ensure application logs are written alongside uvicorn access logs.
+    log_path = Path(settings.data_dir).resolve().parent / "server.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    handler = logging.FileHandler(str(log_path), encoding="utf-8")
+    handler.setFormatter(
+        logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+    )
+    root = logging.getLogger()
+    root.setLevel(logging.INFO)
+    root.addHandler(handler)
+
     routes = [
         Route("/login", pages_route.login, name="login_page"),
         Route("/api/auth/login", auth_route.login, methods=["POST"], name="auth_login"),
@@ -76,6 +89,13 @@ def create_app() -> Starlette:
             sessions_route.clear_messages,
             methods=["DELETE"],
             name="clear_messages",
+        ),
+        Route("/api/mcp/servers", mcp_route.get_servers, methods=["GET"], name="mcp_servers"),
+        Route(
+            "/api/mcp/servers",
+            mcp_route.put_servers,
+            methods=["PUT"],
+            name="mcp_servers_update",
         ),
         Mount("/static", app=StaticFiles(directory=str(_STATIC_DIR)), name="static"),
     ]

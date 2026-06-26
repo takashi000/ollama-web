@@ -544,3 +544,179 @@ button#send-btn { padding: 0 20px; }
   margin: 0;
   color: var(--danger);
 }
+
+/* MCP settings */
+.sidebar-footer {
+  padding: 10px 14px;
+  border-top: 1px solid var(--border);
+}
+
+.sidebar-footer button {
+  width: 100%;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.sidebar-footer button:hover {
+  border-color: var(--accent);
+}
+
+.modal {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  z-index: 300;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.modal.open {
+  display: flex;
+}
+
+.modal-content {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  width: min(720px, 100%);
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.modal-header h2 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.modal-header .close-btn {
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  font-size: 22px;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.modal-header .close-btn:hover {
+  color: var(--text);
+}
+
+.modal-body {
+  padding: 16px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.modal-help {
+  margin: 0 0 14px;
+  font-size: 13px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.modal-help code {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 4px;
+  font-size: 12px;
+}
+
+.modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  padding: 12px 16px;
+  border-top: 1px solid var(--border);
+  gap: 8px;
+}
+
+.modal-footer button {
+  padding: 6px 16px;
+}
+
+.modal-footer button.secondary {
+  background: transparent;
+}
+
+.mcp-server-card {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 12px;
+}
+
+.mcp-server-header {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.mcp-server-name {
+  flex: 1;
+}
+
+.mcp-server-delete {
+  background: transparent;
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+.mcp-server-delete:hover {
+  border-color: var(--danger);
+  background: rgba(248, 81, 73, 0.1);
+}
+
+.mcp-server-type {
+  width: 100%;
+  margin-bottom: 10px;
+}
+
+.mcp-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+
+.mcp-field span {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.mcp-field input,
+.mcp-field textarea {
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px;
+  font-size: 14px;
+  font-family: inherit;
+  width: 100%;
+}
+
+.mcp-field textarea {
+  resize: vertical;
+}
+
+#mcp-add-btn {
+  width: 100%;
+  background: transparent;
+}

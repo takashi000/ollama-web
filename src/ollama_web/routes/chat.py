@@ -16,6 +16,7 @@ from starlette.requests import Request
 from starlette.responses import StreamingResponse
 
 from ..config import settings
+from ..mcp import collect_mcp_tools, make_mcp_executor
 from ..sessions import SessionStore, is_valid_id
 from ..tools.fetch import pop_fetched_files
 from ..tools.helper.image import resize_image
@@ -57,8 +58,8 @@ def _parse_messages(raw: list[dict[str, Any]]) -> list[Message]:
     return out
 
 
-def _session_aware_registry(session_id: str | None) -> ToolRegistry:
-    """Return a registry whose search_and_fetch receives the session id."""
+async def _build_registry(session_id: str | None) -> ToolRegistry:
+    """Return a registry with built-in tools and any configured MCP tools."""
     reg = default_registry()
 
     original = reg.get("search_and_fetch")
@@ -72,6 +73,24 @@ def _session_aware_registry(session_id: str | None) -> ToolRegistry:
             return original(*bound.args, **bound.kwargs)
 
         reg._tools["search_and_fetch"] = wrapped  # noqa: SLF001
+
+    try:
+        mcp_tools = await collect_mcp_tools()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("failed to collect MCP tools: %s", exc)
+        mcp_tools = []
+
+    tool_names = [t.get("function", {}).get("name") for t in mcp_tools]
+    logger.info("collected %d MCP tool(s): %s", len(mcp_tools), tool_names)
+
+    if mcp_tools:
+        executor = make_mcp_executor()
+        for tool_def in mcp_tools:
+            fn = tool_def.get("function", {})
+            name = fn.get("name")
+            if not name:
+                continue
+            reg.register_mcp_tool(name, tool_def, executor)
 
     return reg
 
@@ -188,7 +207,7 @@ async def _chat_event_stream(
 
         from ollama_web import llm  # local import to avoid circular at module load
 
-        registry = _session_aware_registry(session_id)
+        registry = await _build_registry(session_id)
 
         total_image_bytes = sum(
             len(img.value) for img in (getattr(messages[-1], "images", None) or [])
@@ -208,6 +227,13 @@ async def _chat_event_stream(
             model,
             sorted(capabilities),
         )
+
+        # Fallback: some cloud/proxy models support tools even though ollama
+        # does not advertise the capability. Enable tools when the model name
+        # hints at a cloud endpoint and tools are not already reported.
+        if "tools" not in capabilities and ":cloud" in model:
+            capabilities.add("tools")
+            logger.info("enabled tools capability fallback for cloud model %s", model)
 
         async for event in llm.astream_chat_with_tools(
             messages, model, think=think, host=host, registry=registry,

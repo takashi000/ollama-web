@@ -176,3 +176,4 @@ data/
 *.lock
 *.err
 .agents/
+.mcp_test_fs/

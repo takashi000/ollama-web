@@ -188,7 +188,7 @@ function addMessage(role) {
 function addToolBubble(parentExtras, name, args) {
   const det = document.createElement("details");
   det.className = "tool";
-  const label = (TOOLS.find((t) => t.name === name) || { label: name }).label;
+  const label = typeof window.toolLabel === "function" ? window.toolLabel(name) : name;
   const sum = document.createElement("summary");
   sum.textContent = `${label} を実行中…`;
   det.appendChild(sum);
