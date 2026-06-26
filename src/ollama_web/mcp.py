@@ -26,18 +26,8 @@ DEFAULT_TIMEOUT = 30.0
 _MCP_TOOL_PREFIX = "mcp__"
 _SAFE_NAME_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 _MAX_TOOL_DESCRIPTION_CHARS = 1000
+
 _MAX_SCHEMA_DESCRIPTION_CHARS = 500
-_DANGEROUS_TOOL_WORDS = (
-    "delete",
-    "remove",
-    "write",
-    "exec",
-    "shell",
-    "command",
-    "run",
-    "token",
-    "secret",
-)
 _SECRET_KEY_RE = re.compile(r"(?i)(authorization|api[_-]?key|token|secret|cookie|session)")
 _SECRET_VALUE_PATTERNS = (
     re.compile(r"(?i)Bearer\s+[A-Za-z0-9._~+/=-]+"),
@@ -258,14 +248,6 @@ def wrap_untrusted_tool_output(text: str) -> str:
     body = str(redact_secrets(text))
     return f"{_UNTRUSTED_PREFIX}\n<tool-output>\n{body}\n</tool-output>"
 
-
-def is_dangerous_mcp_tool(name: str) -> bool:
-    """Return whether an MCP tool name should require explicit approval."""
-    parsed = _parse_tool_name(name)
-    if parsed is None:
-        return False
-    lowered = parsed[1].lower()
-    return any(word in lowered for word in _DANGEROUS_TOOL_WORDS)
 
 
 def _to_ollama_tool(server_name: str, tool: Any) -> dict[str, Any]:

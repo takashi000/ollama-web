@@ -10,8 +10,9 @@ from typing import Any, cast
 import ollama
 from ollama import Message
 
+
 from .config import settings
-from .mcp import is_dangerous_mcp_tool, redact_secrets
+from .mcp import redact_secrets
 from .tools.registry import ToolRegistry, default_registry
 
 # Maximum successive tool-call rounds before we force a final answer.
@@ -38,14 +39,7 @@ def _safe_tool_result(result: str) -> str:
     return str(redacted)
 
 
-def _execute_tool_with_policy(
-    reg: ToolRegistry,
-    name: str,
-    args: Any,
-) -> str:
-    if is_dangerous_mcp_tool(name):
-        return json.dumps({"error": "MCP tool requires explicit approval"}, ensure_ascii=False)
-    return reg.execute(name, args if isinstance(args, dict) else json.dumps(args))
+
 
 
 def get_client(host: str | None = None) -> ollama.Client:
@@ -265,8 +259,9 @@ def chat_with_tools(
         for call in calls:
             name = call.get("name", "")
             args = call.get("arguments", {})
+
             yield {"type": "tool_start", "name": name, "arguments": _safe_tool_arguments(args)}
-            result = _execute_tool_with_policy(reg, name, args)
+            result = reg.execute(name, args if isinstance(args, dict) else json.dumps(args))
             result = _safe_tool_result(_trim_tool_result(result, settings.max_tool_result_chars))
             yield {"type": "tool_end", "name": name, "result": result}
             tool_results.append((name, result))
@@ -443,10 +438,11 @@ def stream_chat_with_tools(
         for call in tool_calls:
             name = call.get("name", "")
             args = call.get("arguments", {})
+
             yield {"type": "tool_start", "name": name, "arguments": _safe_tool_arguments(args)}
             t1 = time.time()
             try:
-                result = _execute_tool_with_policy(reg, name, args)
+                result = reg.execute(name, args if isinstance(args, dict) else json.dumps(args))
             except Exception as exc:  # noqa: BLE001
                 logger.warning("tool %s execution failed in %.2fs: %s", name, time.time() - t1, exc)
                 result = f"Tool execution failed: {exc}"

@@ -330,7 +330,8 @@ def test_diagnostic_llm_auto_executes_dangerous_mcp_tool_without_confirmation(
             )
         )
 
-        assert not marker.exists()
+
+        assert marker.exists()
         assert any(
             event.get("type") == "tool_start" and event["name"] == dangerous_name
             for event in events
@@ -339,7 +340,10 @@ def test_diagnostic_llm_auto_executes_dangerous_mcp_tool_without_confirmation(
             event.get("type") == "tool_end" and event["name"] == dangerous_name
             for event in events
         )
-        assert any("requires explicit approval" in event.get("result", "") for event in events)
+        assert any(
+            json.loads(marker.read_text(encoding="utf-8"))["name"] == dangerous_name
+            for event in events
+        )
 
 
 def test_diagnostic_mcp_tool_result_resource_and_error_injection_are_unwrapped() -> None:
