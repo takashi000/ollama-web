@@ -547,8 +547,10 @@ async function send() {
   let buffer = "";
 
   let placeholderCleared = false;
+  let streamRafId = null;
 
-  function appendDelta(content) {
+  function flushStreamFrame() {
+    streamRafId = null;
     if (!placeholderCleared) {
       assistantBody.innerHTML = "";
       placeholderCleared = true;
@@ -558,11 +560,24 @@ async function send() {
     if (waiting) {
       waiting.remove();
     }
-    assistantText += content;
-    assistantBody.innerHTML = renderMarkdown(assistantText);
-    highlightIn(assistantBody);
-    renderMathIn(assistantBody);
+    // During the stream we render raw text only. Full markdown, syntax
+    // highlighting and math rendering are deferred to the final renderSession()
+    // call so mobile WebKit is not overwhelmed by rebuilding the DOM for
+    // every single token.
+    assistantBody.textContent = assistantText;
+    assistantBody.style.whiteSpace = "pre-wrap";
     chatEl.scrollTop = chatEl.scrollHeight;
+  }
+
+  function scheduleStreamUpdate() {
+    if (streamRafId === null) {
+      streamRafId = requestAnimationFrame(flushStreamFrame);
+    }
+  }
+
+  function appendDelta(content) {
+    assistantText += content;
+    scheduleStreamUpdate();
   }
 
   while (true) {
@@ -625,7 +640,7 @@ async function send() {
       } else if (ev.type === "thinking") {
         if (!thinkingBody) thinkingBody = addThinkingBubble(assistantExtras);
         thinkingBody.textContent += ev.content;
-        chatEl.scrollTop = chatEl.scrollHeight;
+        scheduleStreamUpdate();
       } else if (ev.type === "delta") {
         appendDelta(ev.content);
       } else if (ev.type === "error") {
@@ -644,6 +659,8 @@ async function send() {
     }
   }
 
+  // Flush any trailing SSE data that did not end with a double newline.
+  let hadTrailingDelta = false;
   if (buffer.trim()) {
     for (const payload of parseSseEvent(buffer)) {
       if (!payload.trim()) continue;
@@ -655,13 +672,19 @@ async function send() {
       }
       if (ev.type === "delta") {
         assistantText += ev.content;
+        hadTrailingDelta = true;
       }
     }
-    if (assistantText) {
-      assistantBody.innerHTML = renderMarkdown(assistantText);
-      highlightIn(assistantBody);
-      renderMathIn(assistantBody);
-    }
+  }
+  // Cancel any pending animation frame and render the trailing text immediately
+  // so the user does not see raw text linger before renderSession() rebuilds
+  // the pane.
+  if (hadTrailingDelta && streamRafId !== null) {
+    cancelAnimationFrame(streamRafId);
+    streamRafId = null;
+  }
+  if (assistantText) {
+    flushStreamFrame();
   }
 
   if (!assistantText && !pendingTools.length && !thinkingBody && !gotError) {
