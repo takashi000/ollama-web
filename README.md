@@ -4,7 +4,7 @@ Ollama をブラウザから利用するためのローカル Web UI です。
 
 Starlette ベースの軽量なサーバーで、チャット、セッション保存、ファイル添付、Web 検索/取得ツール、PDF テキスト抽出を提供します。既定ではローカルホストのみで待ち受け、PIN ログインで UI と API を保護します。
 
-<img src="./docs/capture.gif" width="80%" alt="Screenshot of the chat" />
+<img src="./docs/capture.gif" width="100%" alt="Screenshot of the chat" />
 
 ## Features
 
