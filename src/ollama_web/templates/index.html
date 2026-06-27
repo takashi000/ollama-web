@@ -11,9 +11,7 @@
   <script src="{{ url_for('static', path='vendor/purify.min.js') }}"></script>
   <script src="{{ url_for('static', path='vendor/highlight.min.js') }}"></script>
   <script src="{{ url_for('static', path='vendor/katex.min.js') }}"></script>
-  <script>
-    window.I18N = {{ messages | tojson }};
-  </script>
+  <meta name="ollama-web-i18n" content="{{ messages | tojson | forceescape }}" />
   <script src="{{ url_for('static', path='i18n.js') }}"></script>
 </head>
 <body>

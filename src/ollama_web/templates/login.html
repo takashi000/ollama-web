@@ -5,9 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>ollama-web login</title>
   <link rel="stylesheet" href="{{ url_for('static', path='style.css') }}" />
-  <script>
-    window.I18N = {{ messages | tojson }};
-  </script>
+  <meta name="ollama-web-i18n" content="{{ messages | tojson | forceescape }}" />
   <script src="{{ url_for('static', path='i18n.js') }}"></script>
 </head>
 <body class="login-page">
