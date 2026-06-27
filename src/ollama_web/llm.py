@@ -12,7 +12,9 @@ from ollama import Message
 
 
 from .config import settings
+from .i18n import t
 from .mcp import redact_secrets
+from .prompts import get_prompt
 from .tools.registry import ToolRegistry, default_registry
 
 # Maximum successive tool-call rounds before we force a final answer.
@@ -290,15 +292,12 @@ def chat_with_tools(
     )
     yield {
         "type": "status",
-        "message": "ツール呼び出し上限に達しました。これまでの調査結果を整理中…",
+        "message": t("status.tool_limit_reached"),
     }
     messages.append(
         Message(
             role="user",
-            content=(
-                "ツール呼び出しの上限に達しました。これまでの検索結果と会話を元に、"
-                "ユーザーが求めた回答を最終的にまとめてください。"
-            ),
+            content=get_prompt("tool_limit_instruction"),
         )
     )
     try:
@@ -488,15 +487,12 @@ def stream_chat_with_tools(
     )
     yield {
         "type": "status",
-        "message": "ツール呼び出し上限に達しました。これまでの調査結果を整理中…",
+        "message": t("status.tool_limit_reached"),
     }
     messages.append(
         Message(
             role="user",
-            content=(
-                "ツール呼び出しの上限に達しました。これまでの検索結果と会話を元に、"
-                "ユーザーが求めた回答を最終的にまとめてください。"
-            ),
+            content=get_prompt("tool_limit_instruction"),
         )
     )
     t0 = time.time()

@@ -1,0 +1,100 @@
+{
+  "common": {
+    "send": "Send",
+    "stop": "Stop",
+    "clear": "Clear",
+    "save": "Save",
+    "delete": "Delete"
+  },
+  "chat": {
+    "sessions": "Sessions",
+    "new_session": "New session",
+    "session_list": "Session list",
+    "mcp_settings": "MCP Settings",
+    "model_label": "Model:",
+    "attach_file": "Attach file",
+    "input_placeholder": "Type a message… (Enter to send / Shift+Enter for newline)",
+    "no_sessions": "No sessions",
+    "delete_session": "Delete session",
+    "create_failed": "Failed to create session",
+    "delete_confirm": "Delete this session?",
+    "delete_failed": "Failed to delete session",
+    "upload_failed": "Failed to upload files",
+    "attachment_label": "Attached: {names}",
+    "attachment_files": "Attached files: {names}",
+    "stopped": "Generation stopped",
+    "error_prefix": "Error: {message}",
+    "generating": "ollama is generating a response…",
+    "processing": "Processing…",
+    "no_response": "(No response)",
+    "clear_failed": "Failed to clear",
+    "clear_messages_failed": "Failed to clear messages"
+  },
+  "mcp": {
+    "server_settings": "MCP Server Settings",
+    "add_server": "＋ Add server",
+    "server_name": "Server name",
+    "required": "(required)",
+    "optional": "(optional)",
+    "command": "Command",
+    "args": "Arguments",
+    "env": "Environment variables",
+    "cwd": "Working directory",
+    "url": "URL",
+    "headers": "Headers",
+    "timeout": "Timeout",
+    "sse": "SSE",
+    "stdio": "stdio",
+    "http_stream": "HTTP Stream",
+    "examples": {
+      "command": "e.g. npx",
+      "args": "e.g. -y @modelcontextprotocol/server-filesystem /tmp",
+      "env": "e.g. API_KEY=sk-xxx",
+      "cwd": "e.g. C:\\Users\\Home",
+      "url": "e.g. http://127.0.0.1:9000/mcp",
+      "headers": "e.g. Authorization=Bearer xxx",
+      "timeout": "e.g. 30"
+    }
+  },
+  "login": {
+    "title": "Login",
+    "pin_invalid": "Invalid PIN"
+  },
+  "roles": {
+    "system": "System",
+    "user": "You",
+    "assistant": "Assistant"
+  },
+  "status": {
+    "sending": "Sending…",
+    "fetching_response": "Fetching response…",
+    "done": "Done",
+    "connecting": "Connecting…",
+    "disconnected": "Disconnected",
+    "tool_limit_reached": "Tool call limit reached. Summarizing findings…",
+    "thinking": "Thinking process",
+    "executing_tool": "Executing {label}…",
+    "running": "Running…"
+  },
+  "errors": {
+    "generic": "An error occurred",
+    "vision_model_required": "Select a vision-capable model when sending messages containing images."
+  },
+  "session": {
+    "default_title": "New session"
+  },
+  "html": {
+    "lang": "en"
+  },
+  "tools": {
+    "web_search": "Web search",
+    "scrape_url": "Scraping",
+    "search_and_fetch": "File search and fetch",
+    "pdf_to_text": "PDF text extraction"
+  },
+  "mcp_messages": {
+    "save_failed": "Failed to save: {error}",
+    "saved": "MCP settings saved",
+    "save_error": "Failed to save MCP settings"
+  }
+}

@@ -51,13 +51,13 @@
     const header = document.createElement("div");
     header.className = "mcp-server-header";
 
-    const nameInput = createInput(name, "サーバー名", "text");
+    const nameInput = createInput(name, t("mcp.server_name"), "text");
     nameInput.className = "mcp-server-name";
 
     const delBtn = document.createElement("button");
     delBtn.type = "button";
     delBtn.className = "mcp-server-delete";
-    delBtn.textContent = "削除";
+    delBtn.textContent = t("common.delete");
     delBtn.addEventListener("click", () => card.remove());
 
     header.append(nameInput, delBtn);
@@ -65,8 +65,8 @@
     const typeSelect = document.createElement("select");
     typeSelect.className = "mcp-server-type";
     typeSelect.innerHTML = `
-      <option value="stdio">stdio</option>
-      <option value="http">HTTP Stream</option>
+      <option value="stdio">${t("mcp.stdio", "stdio")}</option>
+      <option value="http">${t("mcp.http_stream", "HTTP Stream")}</option>
     `;
     const isHttp = "url" in server;
     typeSelect.value = isHttp ? "http" : "stdio";
@@ -78,7 +78,7 @@
       const wrap = document.createElement("label");
       wrap.className = "mcp-field";
       const span = document.createElement("span");
-      span.textContent = `${label} ${required ? "(必須)" : "(任意)"}`;
+      span.textContent = `${label} ${required ? t("mcp.required") : t("mcp.optional")}`;
       wrap.append(span, control);
       return wrap;
     }
@@ -87,11 +87,11 @@
       fieldsEl.innerHTML = "";
       const type = typeSelect.value;
       if (type === "stdio") {
-        const command = createInput(server.command || "", "例: npx", "text");
+        const command = createInput(server.command || "", t("mcp.examples.command"), "text");
         command.dataset.key = "command";
         const args = createTextarea(
           (server.args || []).join("\n"),
-          "例: -y @modelcontextprotocol/server-filesystem /tmp",
+          t("mcp.examples.args"),
           3
         );
         args.dataset.key = "args";
@@ -99,41 +99,41 @@
           Object.entries(server.env || {})
             .map(([k, v]) => `${k}=${v}`)
             .join("\n"),
-          "例: API_KEY=sk-xxx",
+          t("mcp.examples.env"),
           3
         );
         env.dataset.key = "env";
-        const cwd = createInput(server.cwd || "", "例: C:\\Users\\Home", "text");
+        const cwd = createInput(server.cwd || "", t("mcp.examples.cwd"), "text");
         cwd.dataset.key = "cwd";
 
         fieldsEl.append(
-          wrapField("command", command, true),
-          wrapField("args", args, false),
-          wrapField("env", env, false),
-          wrapField("cwd", cwd, false)
+          wrapField(t("mcp.command"), command, true),
+          wrapField(t("mcp.args"), args, false),
+          wrapField(t("mcp.env"), env, false),
+          wrapField(t("mcp.cwd"), cwd, false)
         );
       } else {
-        const url = createInput(server.url || "", "例: http://127.0.0.1:9000/mcp", "text");
+        const url = createInput(server.url || "", t("mcp.examples.url"), "text");
         url.dataset.key = "url";
         const headers = createTextarea(
           Object.entries(server.headers || {})
             .map(([k, v]) => `${k}=${v}`)
             .join("\n"),
-          "例: Authorization=Bearer xxx",
+          t("mcp.examples.headers"),
           3
         );
         headers.dataset.key = "headers";
         const timeout = createInput(
           server.timeout !== undefined ? String(server.timeout) : "",
-          "例: 30",
+          t("mcp.examples.timeout"),
           "number"
         );
         timeout.dataset.key = "timeout";
 
         fieldsEl.append(
-          wrapField("url", url, true),
-          wrapField("headers", headers, false),
-          wrapField("timeout", timeout, false)
+          wrapField(t("mcp.url"), url, true),
+          wrapField(t("mcp.headers"), headers, false),
+          wrapField(t("mcp.timeout"), timeout, false)
         );
       }
     }
@@ -247,15 +247,16 @@
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        alert(`保存に失敗しました: ${(data.error || []).join(" / ") || res.statusText}`);
+        const errorText = (data.error || []).join(" / ") || res.statusText;
+        alert(t("mcp_messages.save_failed", "Failed to save: {error}").replace("{error}", errorText));
         return;
       }
       currentConfig = await res.json();
-      alert("MCP設定を保存しました");
+      alert(t("mcp_messages.saved"));
       closeModal();
     } catch (err) {
       console.error("failed to save MCP config", err);
-      alert("MCP設定の保存に失敗しました");
+      alert(t("mcp_messages.save_error"));
     }
   });
 

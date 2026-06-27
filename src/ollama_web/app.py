@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import Any
 
 from starlette.applications import Starlette
 from starlette.middleware import Middleware
 from starlette.middleware.cors import CORSMiddleware
+from starlette.requests import Request
+from starlette.responses import Response
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
@@ -21,6 +24,19 @@ from .routes import models as models_route
 from .routes import pages as pages_route
 from .routes import sessions as sessions_route
 from .sessions import SessionStore
+
+
+class NoCacheStaticFiles(StaticFiles):
+    """StaticFiles variant that disables browser caching for local development.
+
+    This ensures language changes and JS updates are reflected immediately after
+    a server restart, without requiring users to clear the browser cache.
+    """
+
+    async def get_response(self, path: str, scope: Any) -> Response:
+        response = await super().get_response(path, scope)
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        return response
 
 _STATIC_DIR = Path(__file__).resolve().parent / "static"
 
@@ -97,7 +113,7 @@ def create_app() -> Starlette:
             methods=["PUT"],
             name="mcp_servers_update",
         ),
-        Mount("/static", app=StaticFiles(directory=str(_STATIC_DIR)), name="static"),
+        Mount("/static", app=NoCacheStaticFiles(directory=str(_STATIC_DIR)), name="static"),
     ]
 
     middleware = [Middleware(SecurityHeadersMiddleware), Middleware(AuthMiddleware)]

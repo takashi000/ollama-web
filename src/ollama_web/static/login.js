@@ -14,7 +14,7 @@ form.addEventListener("submit", async (event) => {
     body: JSON.stringify({ pin: pinInput.value }),
   });
   if (!res.ok) {
-    errorEl.textContent = "PINが違います";
+    errorEl.textContent = t("login.pin_invalid", "Invalid PIN");
     return;
   }
   const requestedNext = new URLSearchParams(window.location.search).get("next") || "/";

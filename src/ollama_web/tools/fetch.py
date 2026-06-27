@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from ..config import settings
+from ..prompts import get_prompt, get_prompts
 from .helper.pdf import extract_pdf_text
 from .helper.safe_http import fetch_public_bytes
 from .scrape import scrape_url
@@ -147,11 +148,11 @@ def search_and_fetch(
       successfully fetched file.
     """
     if not query or not query.strip():
-        return "Empty query."
+        return get_prompt("fetch.empty_query")
 
     ft = _normalize_file_type(file_type)
     if not ft:
-        return "Invalid file type."
+        return get_prompt("fetch.invalid_type")
 
     limit = min(
         max_results
@@ -177,7 +178,7 @@ def search_and_fetch(
                 break
 
     if not matched:
-        return f"No {ft} files found for query: {query}"
+        return get_prompt("fetch.no_results", fallback="").replace("{file_type}", ft).replace("{query}", query)
 
     outputs: list[str] = []
     for idx, item in enumerate(matched, 1):
@@ -186,9 +187,10 @@ def search_and_fetch(
         try:
             data = _fetch_bytes(url)
         except Exception as exc:  # noqa: BLE001
+            p = get_prompts()
             outputs.append(
-                f"=== 候補 {idx} ===\n"
-                f"URL: {url}\nタイトル: {title}\n状態: 取得失敗 ({exc})\n"
+                f"=== {p['candidate']} {idx} ===\n"
+                f"URL: {url}\n{p['title']}: {title}\n{p['status']}: {p['fetch_failed']} ({exc})\n"
             )
             continue
 
@@ -199,14 +201,15 @@ def search_and_fetch(
         name = Path(httpx.URL(url).path or f"file.{ft}").name
         if session_id:
             store_fetched_file(session_id, name, data, mime, text, url)
+        p = get_prompts()
         outputs.append(
-            f"=== 候補 {idx} ===\n"
+            f"=== {p['candidate']} {idx} ===\n"
             f"URL: {url}\n"
-            f"タイトル: {title}\n"
-            f"形式: {mime}\n"
-            f"サイズ: {len(data)} bytes\n"
-            f"文字数: {len(text)}\n"
-            f"---\n{text}\n"
+            f"{p['title']}: {title}\n"
+            f"{p['type']}: {mime}\n"
+            f"{p['size']}: {len(data)} bytes\n"
+            f"{p['chars']}: {len(text)}\n"
+            f"{p['separator']}\n{text}\n"
         )
 
     return "\n".join(outputs)

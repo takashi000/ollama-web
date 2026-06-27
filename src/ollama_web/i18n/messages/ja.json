@@ -1,0 +1,100 @@
+{
+  "common": {
+    "send": "送信",
+    "stop": "停止",
+    "clear": "クリア",
+    "save": "保存",
+    "delete": "削除"
+  },
+  "chat": {
+    "sessions": "セッション",
+    "new_session": "新規セッション",
+    "session_list": "セッション一覧",
+    "mcp_settings": "MCP設定",
+    "model_label": "モデル:",
+    "attach_file": "ファイルを添付",
+    "input_placeholder": "メッセージを入力… (Enter で送信 / Shift+Enter で改行)",
+    "no_sessions": "セッションがありません",
+    "delete_session": "セッションを削除",
+    "create_failed": "セッションの作成に失敗しました",
+    "delete_confirm": "このセッションを削除しますか？",
+    "delete_failed": "セッションの削除に失敗しました",
+    "upload_failed": "ファイルのアップロードに失敗しました",
+    "attachment_label": "添付: {names}",
+    "attachment_files": "添付ファイル: {names}",
+    "stopped": "生成を停止しました",
+    "error_prefix": "エラー: {message}",
+    "generating": "ollama が回答を生成中…",
+    "processing": "処理中…",
+    "no_response": "（応答なし）",
+    "clear_failed": "クリアに失敗しました",
+    "clear_messages_failed": "メッセージのクリアに失敗しました"
+  },
+  "mcp": {
+    "server_settings": "MCPサーバー設定",
+    "add_server": "＋ サーバー追加",
+    "server_name": "サーバー名",
+    "required": "(必須)",
+    "optional": "(任意)",
+    "command": "コマンド",
+    "args": "引数",
+    "env": "環境変数",
+    "cwd": "作業ディレクトリ",
+    "url": "URL",
+    "headers": "ヘッダー",
+    "timeout": "タイムアウト",
+    "sse": "SSE",
+    "stdio": "stdio",
+    "http_stream": "HTTP Stream",
+    "examples": {
+      "command": "例: npx",
+      "args": "例: -y @modelcontextprotocol/server-filesystem /tmp",
+      "env": "例: API_KEY=sk-xxx",
+      "cwd": "例: C:\\Users\\Home",
+      "url": "例: http://127.0.0.1:9000/mcp",
+      "headers": "例: Authorization=Bearer xxx",
+      "timeout": "例: 30"
+    }
+  },
+  "login": {
+    "title": "ログイン",
+    "pin_invalid": "PINが違います"
+  },
+  "roles": {
+    "system": "システム",
+    "user": "あなた",
+    "assistant": "アシスタント"
+  },
+  "status": {
+    "sending": "送信中...",
+    "fetching_response": "応答を取得中...",
+    "done": "完了",
+    "connecting": "接続中...",
+    "disconnected": "切断しました",
+    "tool_limit_reached": "ツール呼び出し上限に達しました。これまでの調査結果を整理中…",
+    "thinking": "思考プロセス",
+    "executing_tool": "{label} を実行中…",
+    "running": "実行中…"
+  },
+  "errors": {
+    "generic": "エラーが発生しました",
+    "vision_model_required": "画像を含むメッセージを送信する場合、vision 対応モデルを選択してください。"
+  },
+  "session": {
+    "default_title": "新しいセッション"
+  },
+  "html": {
+    "lang": "ja"
+  },
+  "tools": {
+    "web_search": "Web検索",
+    "scrape_url": "スクレイピング",
+    "search_and_fetch": "ファイル検索・取得",
+    "pdf_to_text": "PDFテキスト変換"
+  },
+  "mcp_messages": {
+    "save_failed": "保存に失敗しました: {error}",
+    "saved": "MCP設定を保存しました",
+    "save_error": "MCP設定の保存に失敗しました"
+  }
+}

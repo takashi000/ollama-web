@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from .config import settings
+from .i18n import t
 
 _UUID_HEX_RE = re.compile(r"^[0-9a-f]{32}$")
 
@@ -156,7 +157,7 @@ class SessionStore:
         now = _now()
         session = {
             "id": session_id,
-            "title": title or "新しいセッション",
+            "title": title or t("session.default_title"),
             "created_at": now,
             "updated_at": now,
             "messages": [],

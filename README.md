@@ -77,6 +77,11 @@ ollama-web
 | `OLLAMA_WEB_ALLOWED_ORIGINS` | 未設定 | CORS 許可オリジンのカンマ区切り |
 | `OLLAMA_WEB_MCP_STDIO_ALLOWLIST` | 未設定 | stdio MCP で起動を許可する実行ファイル絶対パスのカンマ区切り |
 | `OLLAMA_WEB_MCP_HTTPS_ALLOWLIST` | 未設定 | remote HTTPS MCP 接続を許可するホスト名のカンマ区切り |
+| `OLLAMA_WEB_LANGUAGE` | `ja` | UI と LLM プロンプトの表示言語（`ja` または `en`） |
+
+### 多言語対応
+
+UI 文言と LLM プロンプトは、それぞれ `src/ollama_web/i18n/messages/` と `src/ollama_web/prompts/` の JSON ファイルで管理されています。既定は日本語（`ja`）です。新しい言語を追加する場合は、同じディレクトリに `{lang}.json` を作成し、`OLLAMA_WEB_LANGUAGE` をその言語コードに設定してください。
 
 ### MCP サーバー設定
 

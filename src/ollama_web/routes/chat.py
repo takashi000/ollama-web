@@ -16,7 +16,9 @@ from starlette.requests import Request
 from starlette.responses import StreamingResponse
 
 from ..config import settings
+from ..i18n import t
 from ..mcp import collect_mcp_tools, make_mcp_executor
+from ..prompts import get_prompt
 from ..sessions import SessionStore, is_valid_id
 from ..tools.fetch import pop_fetched_files
 from ..tools.helper.image import resize_image
@@ -27,11 +29,7 @@ logger = logging.getLogger("ollama_web.chat")
 
 # System prompt injected when tools are enabled. Encourages the model to use
 # tools iteratively rather than firing many searches at once.
-_TOOL_SYSTEM_PROMPT = (
-    "あなたはWeb検索・スクレイピング・ファイル取得ツールを利用できます。"
-    "一度の回答で必要以上に多くの検索を同時に行わず、結果を確認してから次の調査を行ってください。"
-    "各ツール結果は要約されて提供されるため、重要なポイントを把握して活用してください。"
-)
+_TOOL_SYSTEM_PROMPT = get_prompt("tool_system")
 
 
 def _limit_text(text: str, limit: int) -> str:
@@ -111,7 +109,7 @@ def _attachment_context(store: SessionStore, session_id: str, file_ids: list[str
         )
     if not parts:
         return ""
-    return "\n\n".join(["以下はユーザーが添付したファイルの内容です：", *parts])
+    return "\n\n".join([get_prompt("attachment_prefix"), *parts])
 
 
 def _collect_images(store: SessionStore, session_id: str, file_ids: list[str]) -> list[bytes]:
@@ -257,7 +255,7 @@ async def _chat_event_stream(
         # and re-renders in the chat pane.
         assistant_text = (
             f"[ERROR] {error_msg}\n\n"
-            "画像を含むメッセージを送信する場合、vision 対応モデルを選択してください。"
+            f"{t('errors.vision_model_required')}"
         )
 
     finally:

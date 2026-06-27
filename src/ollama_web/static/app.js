@@ -170,7 +170,7 @@ function addMessage(role) {
   div.className = `message ${role}`;
   const roleEl = document.createElement("div");
   roleEl.className = "role";
-  roleEl.textContent = role === "user" ? "あなた" : "アシスタント";
+  roleEl.textContent = role === "user" ? t("roles.user") : t("roles.assistant");
   const body = document.createElement("div");
   body.className = "body";
   div.append(roleEl, body);
@@ -190,7 +190,7 @@ function addToolBubble(parentExtras, name, args) {
   det.className = "tool";
   const label = typeof window.toolLabel === "function" ? window.toolLabel(name) : name;
   const sum = document.createElement("summary");
-  sum.textContent = `${label} を実行中…`;
+  sum.textContent = t("status.executing_tool", "Executing {label}…").replace("{label}", label);
   det.appendChild(sum);
   if (args && Object.keys(args).length) {
     const a = document.createElement("div");
@@ -210,7 +210,7 @@ function addThinkingBubble(parentExtras) {
   const det = document.createElement("details");
   det.className = "thinking";
   const sum = document.createElement("summary");
-  sum.textContent = "思考プロセス";
+  sum.textContent = t("status.thinking");
   const body = document.createElement("div");
   det.append(sum, body);
   parentExtras.appendChild(det);
@@ -261,7 +261,7 @@ function renderSessionList(sessions) {
   if (!sessions.length) {
     const li = document.createElement("li");
     li.className = "empty";
-    li.textContent = "セッションがありません";
+    li.textContent = t("chat.no_sessions");
     sessionListEl.appendChild(li);
     return;
   }
@@ -274,8 +274,8 @@ function renderSessionList(sessions) {
     title.textContent = s.title || s.id;
     const del = document.createElement("button");
     del.className = "delete";
-    del.textContent = "削除";
-    del.title = "セッションを削除";
+    del.textContent = t("common.delete");
+    del.title = t("chat.delete_session");
     del.addEventListener("click", (e) => {
       e.stopPropagation();
       deleteSession(s.id);
@@ -295,12 +295,12 @@ async function createSession() {
     await selectSession(session.id);
   } catch (err) {
     console.error("failed to create session", err);
-    alert("セッションの作成に失敗しました");
+    alert(t("chat.create_failed"));
   }
 }
 
 async function deleteSession(id) {
-  if (!confirm("このセッションを削除しますか？")) return;
+  if (!confirm(t("chat.delete_confirm"))) return;
   try {
     const res = await csrfFetch(`/api/sessions/${id}`, { method: "DELETE" });
     if (!res.ok) throw new Error(res.statusText);
@@ -314,7 +314,7 @@ async function deleteSession(id) {
     await loadSessions();
   } catch (err) {
     console.error("failed to delete session", err);
-    alert("セッションの削除に失敗しました");
+    alert(t("chat.delete_failed"));
   }
 }
 
@@ -381,7 +381,7 @@ function renderSession() {
             return f ? f.name : fid;
           })
           .join(", ");
-        info.textContent = `添付: ${names}`;
+        info.textContent = t("chat.attachment_label", "Attached: {names}").replace("{names}", names);
         body.appendChild(info);
       }
     } else if (m.role === "assistant") {
@@ -437,7 +437,7 @@ async function uploadFiles(files) {
     await selectSession(currentSessionId);
   } catch (err) {
     console.error("failed to upload files", err);
-    alert("ファイルのアップロードに失敗しました");
+    alert(t("chat.upload_failed"));
   }
 }
 
@@ -489,7 +489,7 @@ async function send() {
   let displayContent = text;
   if (pendingFiles.length) {
     const names = pendingFiles.map((f) => f.name).join(", ");
-    displayContent += (text ? "\n\n" : "") + `添付ファイル: ${names}`;
+    displayContent += (text ? "\n\n" : "") + t("chat.attachment_files", "Attached files: {names}").replace("{names}", names);
   }
   userBody.innerHTML = renderMarkdown(displayContent);
   highlightIn(userBody);
@@ -527,7 +527,9 @@ async function send() {
     });
   } catch (err) {
     assistantBody.textContent =
-      err.name === "AbortError" ? "生成を停止しました" : `エラー: ${err.message}`;
+      err.name === "AbortError"
+        ? t("chat.stopped")
+        : t("chat.error_prefix", "Error: {message}").replace("{message}", err.message);
     abortController = null;
     cancelBtn.disabled = true;
     sendBtn.disabled = false;
@@ -535,7 +537,7 @@ async function send() {
   }
 
   if (!res.ok || !res.body) {
-    assistantBody.textContent = `エラー: ${res.status}`;
+    assistantBody.textContent = t("chat.error_prefix", "Error: {message}").replace("{message}", res.status);
     abortController = null;
     cancelBtn.disabled = true;
     sendBtn.disabled = false;
@@ -606,7 +608,10 @@ async function send() {
       } else if (ev.type === "tool_end") {
         const b = pendingTools.shift();
         if (b) {
-          b.sum.textContent = b.sum.textContent.replace("実行中…", "完了");
+          b.sum.textContent = b.sum.textContent.replace(
+            t("status.running", "Running…"),
+            t("status.done")
+          );
           b.result.textContent = (ev.result || "").slice(0, 2000);
           chatEl.scrollTop = chatEl.scrollHeight;
         }
@@ -621,7 +626,7 @@ async function send() {
           waiting.className = "waiting-msg";
           waiting.style.color = "var(--muted)";
           waiting.style.fontStyle = "italic";
-          waiting.textContent = "ollama が回答を生成中…";
+          waiting.textContent = t("chat.generating");
           assistantBody.appendChild(waiting);
         }
       } else if (ev.type === "status") {
@@ -634,7 +639,7 @@ async function send() {
           waiting.className = "waiting-msg";
           waiting.style.color = "var(--muted)";
           waiting.style.fontStyle = "italic";
-          waiting.textContent = ev.message || "処理中…";
+          waiting.textContent = ev.message || t("chat.processing");
           assistantBody.appendChild(waiting);
         }
       } else if (ev.type === "thinking") {
@@ -651,7 +656,7 @@ async function send() {
         }
         const span = document.createElement("span");
         span.style.color = "#f85149";
-        span.textContent = `エラー: ${ev.message}`;
+        span.textContent = t("chat.error_prefix", "Error: {message}").replace("{message}", ev.message);
         assistantBody.appendChild(span);
       } else if (ev.type === "done") {
         break;
@@ -688,7 +693,7 @@ async function send() {
   }
 
   if (!assistantText && !pendingTools.length && !thinkingBody && !gotError) {
-    assistantBody.textContent = "（応答なし）";
+    assistantBody.textContent = t("chat.no_response");
   }
 
   abortController = null;
@@ -704,7 +709,7 @@ async function send() {
 
   if (errorHtml && chatEl.lastElementChild) {
     const lastBody = chatEl.lastElementChild.querySelector(".body");
-    if (lastBody && lastBody.textContent.trim() === "（応答なし）") {
+    if (lastBody && lastBody.textContent.trim() === t("chat.no_response")) {
       lastBody.innerHTML = errorHtml;
     }
   }
@@ -736,7 +741,7 @@ async function clearMessages() {
     });
     if (!res.ok) throw new Error(res.statusText);
     const data = await res.json();
-    if (!data.cleared) throw new Error("クリアに失敗しました");
+    if (!data.cleared) throw new Error(t("chat.clear_failed"));
 
     if (currentSession) {
       currentSession.messages = [];
@@ -747,7 +752,7 @@ async function clearMessages() {
     renderAttachments();
   } catch (err) {
     console.error("failed to clear messages", err);
-    alert("メッセージのクリアに失敗しました");
+    alert(t("chat.clear_messages_failed"));
   }
 }
 

@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ja">
+<html lang="{{ t('html.lang') }}">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -11,26 +11,30 @@
   <script src="{{ url_for('static', path='vendor/purify.min.js') }}"></script>
   <script src="{{ url_for('static', path='vendor/highlight.min.js') }}"></script>
   <script src="{{ url_for('static', path='vendor/katex.min.js') }}"></script>
+  <script>
+    window.I18N = {{ messages | tojson }};
+  </script>
+  <script src="{{ url_for('static', path='i18n.js') }}"></script>
 </head>
 <body>
   <aside id="sidebar">
     <div class="sidebar-header">
-      <h2>セッション</h2>
-      <button id="new-session-btn" type="button" title="新規セッション">＋</button>
+      <h2>{{ t('chat.sessions') }}</h2>
+      <button id="new-session-btn" type="button" title="{{ t('chat.new_session') }}">＋</button>
     </div>
     <ul id="session-list"></ul>
     <div class="sidebar-footer">
-      <button id="mcp-settings-btn" type="button">MCP設定</button>
+      <button id="mcp-settings-btn" type="button">{{ t('chat.mcp_settings') }}</button>
     </div>
   </aside>
   <div id="sidebar-backdrop"></div>
 
   <div id="main">
     <header>
-      <button id="menu-btn" type="button" aria-label="セッション一覧">☰</button>
+      <button id="menu-btn" type="button" aria-label="{{ t('chat.session_list') }}">☰</button>
       <h1>ollama-web</h1>
       <div class="controls">
-        <label for="model-select">モデル:</label>
+        <label for="model-select">{{ t('chat.model_label') }}</label>
         <select id="model-select">
           {% if models %}
             {% for m in models %}
@@ -43,7 +47,7 @@
         <label class="think-toggle">
           <input type="checkbox" id="think-toggle" /> thinking
         </label>
-        <button id="clear-btn" type="button">クリア</button>
+        <button id="clear-btn" type="button">{{ t('common.clear') }}</button>
       </div>
     </header>
 
@@ -53,14 +57,14 @@
 
     <form id="input-form">
       <div class="input-row">
-        <label class="attach-btn" title="ファイルを添付">
+        <label class="attach-btn" title="{{ t('chat.attach_file') }}">
           <input type="file" id="file-input" multiple accept="*/*" />
           📎
         </label>
-        <textarea id="input" placeholder="メッセージを入力… (Enter で送信 / Shift+Enter で改行)"
+        <textarea id="input" placeholder="{{ t('chat.input_placeholder') }}"
                   rows="2" autofocus></textarea>
-        <button type="submit" id="send-btn">送信</button>
-        <button type="button" id="cancel-btn" disabled>停止</button>
+        <button type="submit" id="send-btn">{{ t('common.send') }}</button>
+        <button type="button" id="cancel-btn" disabled>{{ t('common.stop') }}</button>
       </div>
     </form>
   </div>
@@ -68,15 +72,15 @@
   <div id="mcp-modal" class="modal">
     <div class="modal-content">
       <div class="modal-header">
-        <h2>MCPサーバー設定</h2>
+        <h2>{{ t('mcp.server_settings') }}</h2>
         <button id="mcp-modal-close" type="button" class="close-btn">&times;</button>
       </div>
       <div class="modal-body">
         <div id="mcp-servers"></div>
-        <button id="mcp-add-btn" type="button" class="secondary">＋ サーバー追加</button>
+        <button id="mcp-add-btn" type="button" class="secondary">{{ t('mcp.add_server') }}</button>
       </div>
       <div class="modal-footer">
-        <button id="mcp-save-btn" type="button">保存</button>
+        <button id="mcp-save-btn" type="button">{{ t('common.save') }}</button>
       </div>
     </div>
   </div>
