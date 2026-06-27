@@ -4,12 +4,14 @@
     "stop": "Stop",
     "clear": "Clear",
     "save": "Save",
-    "delete": "Delete"
+    "delete": "Delete",
+    "close": "Close"
   },
   "chat": {
     "sessions": "Sessions",
     "new_session": "New session",
     "session_list": "Session list",
+    "general_settings": "General Settings",
     "mcp_settings": "MCP Settings",
     "model_label": "Model:",
     "attach_file": "Attach file",
@@ -96,5 +98,41 @@
     "save_failed": "Failed to save: {error}",
     "saved": "MCP settings saved",
     "save_error": "Failed to save MCP settings"
+  },
+  "settings": {
+    "back": "Back",
+    "general": {
+      "title": "General Settings",
+      "description": "Choose the settings you want to change."
+    },
+    "ui": {
+      "title": "UI Settings",
+      "description": "Change the display language.",
+      "language": "Language",
+      "reload_notice": "The page reloads after saving to apply the change."
+    },
+    "ollama": {
+      "title": "Ollama Settings",
+      "description": "Change the system prompt and generation options.",
+      "system_prompt": "System prompt",
+      "system_prompt_placeholder": "Instructions appended after the built-in tool prompt",
+      "temperature": "temperature",
+      "num_ctx": "Context length",
+      "seed": "seed",
+      "seed_mode": "Seed mode",
+      "seed_random": "Random (not specified)",
+      "seed_fixed": "Fixed value",
+      "seed_value": "Fixed seed value",
+      "advanced": "Advanced settings",
+      "blank_omitted": "Blank options are not sent to Ollama.",
+      "stop_placeholder": "Enter one stop sequence per line"
+    },
+    "messages": {
+      "load_failed": "Failed to load settings.",
+      "save_failed": "Failed to save settings: {error}",
+      "saved": "Settings saved.",
+      "invalid_integer": "Enter an integer.",
+      "invalid_number": "Enter a number."
+    }
   }
 }

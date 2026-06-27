@@ -83,6 +83,12 @@ ollama-web
 
 UI 文言と LLM プロンプトは、それぞれ `src/ollama_web/i18n/messages/` と `src/ollama_web/prompts/` の JSON ファイルで管理されています。既定は日本語（`ja`）です。新しい言語を追加する場合は、同じディレクトリに `{lang}.json` を作成し、`OLLAMA_WEB_LANGUAGE` をその言語コードに設定してください。
 
+### 一般設定
+
+ブラウザの左ペイン下部にある「一般設定」から、表示言語、システムプロンプト、Ollama の生成Optionsを変更できます。設定は `OLLAMA_WEB_DATA_DIR/settings.json` に保存され、このデータディレクトリを利用する全セッションで共有されます。
+
+保存済みの表示言語は `OLLAMA_WEB_LANGUAGE` より優先されます。システムプロンプトは内蔵のTool用プロンプトの後に追加され、空欄の詳細Optionsと乱数モードの `seed` はOllamaへ送信されません。
+
 ### MCP サーバー設定
 
 `data/mcpServers.json` に接続先 MCP サーバーを記述します。ブラウザの左ペイン下部「MCP設定」からも編集・保存できます。

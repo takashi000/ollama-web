@@ -9,7 +9,6 @@ from typing import Any
 from starlette.applications import Starlette
 from starlette.middleware import Middleware
 from starlette.middleware.cors import CORSMiddleware
-from starlette.requests import Request
 from starlette.responses import Response
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
@@ -23,6 +22,7 @@ from .routes import mcp as mcp_route
 from .routes import models as models_route
 from .routes import pages as pages_route
 from .routes import sessions as sessions_route
+from .routes import settings_route
 from .sessions import SessionStore
 
 
@@ -69,6 +69,18 @@ def create_app() -> Starlette:
             name="model_capabilities",
         ),
         Route("/api/health", models_route.health, methods=["GET"], name="health"),
+        Route(
+            "/api/settings",
+            settings_route.get_settings,
+            methods=["GET"],
+            name="settings",
+        ),
+        Route(
+            "/api/settings",
+            settings_route.put_settings,
+            methods=["PUT"],
+            name="settings_update",
+        ),
         Route("/api/sessions", sessions_route.list_sessions, methods=["GET"], name="list_sessions"),
         Route(
             "/api/sessions",
@@ -122,7 +134,7 @@ def create_app() -> Starlette:
             Middleware(
                 CORSMiddleware,
                 allow_origins=settings.allowed_origins,
-                allow_methods=["GET", "POST", "DELETE"],
+                allow_methods=["GET", "POST", "PUT", "DELETE"],
                 allow_headers=["Content-Type", "X-CSRF-Token"],
                 allow_credentials=True,
             )

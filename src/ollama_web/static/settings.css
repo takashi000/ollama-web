@@ -1,0 +1,52 @@
+.sidebar-footer { display: flex; flex-direction: column; gap: 8px; }
+.settings-modal-content { width: min(760px, 100%); }
+.settings-heading { display: flex; align-items: center; gap: 8px; }
+.settings-back-btn {
+  background: transparent; color: var(--text); border: 1px solid var(--border);
+  border-radius: 6px; padding: 3px 9px; cursor: pointer;
+}
+.settings-menu {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px;
+}
+.settings-menu-card {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 6px;
+  min-height: 100px; padding: 16px; text-align: left; color: var(--text);
+  background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+  cursor: pointer;
+}
+.settings-menu-card:hover { border-color: var(--accent); }
+.settings-menu-card span, .field-help { color: var(--muted); font-size: 13px; }
+.settings-field {
+  display: flex; flex-direction: column; gap: 6px; margin-bottom: 16px;
+}
+.settings-field > span { color: var(--muted); font-size: 13px; }
+.settings-field input:not([type="range"]),
+.settings-field textarea, .settings-field select,
+.seed-controls input, .seed-controls select {
+  width: 100%; padding: 8px; color: var(--text); background: var(--panel);
+  border: 1px solid var(--border); border-radius: 6px; font: inherit;
+}
+.settings-field textarea { resize: vertical; }
+.settings-field input[type="range"] { width: 100%; accent-color: var(--accent); }
+.range-labels {
+  display: flex; justify-content: space-between; color: var(--muted); font-size: 11px;
+}
+.seed-controls {
+  display: grid; grid-template-columns: minmax(180px, 1fr) minmax(120px, 1fr); gap: 8px;
+}
+.advanced-settings {
+  margin-top: 8px; padding: 12px; background: var(--bg);
+  border: 1px solid var(--border); border-radius: 8px;
+}
+.advanced-settings summary { cursor: pointer; font-weight: 600; }
+.option-grid {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 12px; margin-top: 14px;
+}
+.settings-status { min-height: 20px; color: var(--muted); font-size: 13px; }
+.settings-status.error { color: var(--danger); }
+@media (max-width: 600px) {
+  .settings-menu, .option-grid, .seed-controls { grid-template-columns: 1fr; }
+  .settings-modal-content { max-height: 95vh; }
+  .range-labels { font-size: 9px; }
+}

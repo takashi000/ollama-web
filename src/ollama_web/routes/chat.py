@@ -20,6 +20,7 @@ from ..i18n import t
 from ..mcp import collect_mcp_tools, make_mcp_executor
 from ..prompts import get_prompt
 from ..sessions import SessionStore, is_valid_id
+from ..settings_store import load_app_settings
 from ..tools.fetch import pop_fetched_files
 from ..tools.helper.image import resize_image
 from ..tools.registry import ToolRegistry, default_registry
@@ -27,15 +28,16 @@ from ..tools.registry import ToolRegistry, default_registry
 logger = logging.getLogger("ollama_web.chat")
 
 
-# System prompt injected when tools are enabled. Encourages the model to use
-# tools iteratively rather than firing many searches at once.
-_TOOL_SYSTEM_PROMPT = get_prompt("tool_system")
-
-
 def _limit_text(text: str, limit: int) -> str:
     if len(text) <= limit:
         return text
     return text[:limit] + "\n…[truncated]"
+
+
+def _compose_system_prompt(language: str, custom_prompt: str) -> str:
+    """Combine the localized built-in tool prompt with the user prompt."""
+    tool_prompt = get_prompt("tool_system", lang=language)
+    return f"{tool_prompt}\n\n{custom_prompt}" if custom_prompt else tool_prompt
 
 
 def _parse_messages(raw: list[dict[str, Any]]) -> list[Message]:
@@ -153,6 +155,13 @@ async def _chat_event_stream(
     """Core chat loop yielding events. Exceptions are converted to SSE error events."""
     model = payload.get("model") or request.app.state.settings.default_model
     think = payload.get("think")
+    runtime_settings = request.app.state.settings
+    app_settings = load_app_settings(runtime_settings.data_dir, runtime_settings.language)
+    language = str(app_settings["ui"]["language"])
+    ollama_settings = app_settings["ollama"]
+    ollama_options = dict(ollama_settings["options"])
+    custom_prompt = str(ollama_settings["system_prompt"])
+    system_prompt = _compose_system_prompt(language, custom_prompt)
 
     store: SessionStore = request.app.state.session_store
     file_ids: list[str] = [
@@ -202,7 +211,7 @@ async def _chat_event_stream(
         # are available. Avoid duplicate injection if the session already has
         # a system message.
         if not any(getattr(m, "role", None) == "system" for m in messages):
-            messages.insert(0, Message(role="system", content=_TOOL_SYSTEM_PROMPT))
+            messages.insert(0, Message(role="system", content=system_prompt))
 
         host = request.app.state.settings.ollama_host
 
@@ -238,7 +247,7 @@ async def _chat_event_stream(
 
         async for event in llm.astream_chat_with_tools(
             messages, model, think=think, host=host, registry=registry,
-            capabilities=capabilities,
+            capabilities=capabilities, options=ollama_options, language=language,
         ):
             if event.get("type") == "delta":
                 assistant_text = _limit_text(
@@ -255,7 +264,7 @@ async def _chat_event_stream(
         # and re-renders in the chat pane.
         assistant_text = (
             f"[ERROR] {error_msg}\n\n"
-            f"{t('errors.vision_model_required')}"
+            f"{t('errors.vision_model_required', lang=language)}"
         )
 
     finally:

@@ -10,7 +10,6 @@ from typing import Any, cast
 import ollama
 from ollama import Message
 
-
 from .config import settings
 from .i18n import t
 from .mcp import redact_secrets
@@ -186,6 +185,8 @@ def chat_with_tools(
     registry: ToolRegistry | None = None,
     host: str | None = None,
     capabilities: set[str] | None = None,
+    options: dict[str, Any] | None = None,
+    language: str | None = None,
 ) -> Iterator[dict[str, Any]]:
     """Run a multi-round tool-calling chat and yield progress events.
 
@@ -234,6 +235,7 @@ def chat_with_tools(
                 messages=messages,
                 tools=effective_tools,
                 think=effective_think,
+                options=options or None,
                 stream=False,
             )
         except Exception as exc:  # noqa: BLE001
@@ -292,12 +294,12 @@ def chat_with_tools(
     )
     yield {
         "type": "status",
-        "message": t("status.tool_limit_reached"),
+        "message": t("status.tool_limit_reached", lang=language),
     }
     messages.append(
         Message(
             role="user",
-            content=get_prompt("tool_limit_instruction"),
+            content=get_prompt("tool_limit_instruction", lang=language),
         )
     )
     try:
@@ -306,6 +308,7 @@ def chat_with_tools(
             messages=messages,
             tools=effective_tools,
             think=effective_think,
+            options=options or None,
             stream=False,
         )
     except Exception as exc:  # noqa: BLE001
@@ -341,6 +344,8 @@ def stream_chat_with_tools(
     registry: ToolRegistry | None = None,
     host: str | None = None,
     capabilities: set[str] | None = None,
+    options: dict[str, Any] | None = None,
+    language: str | None = None,
 ) -> Iterator[dict[str, Any]]:
     """Run a tool-calling chat loop and yield real streaming events from ollama.
 
@@ -386,6 +391,7 @@ def stream_chat_with_tools(
                 messages=messages,
                 tools=effective_tools,
                 think=effective_think,
+                options=options or None,
                 stream=True,
             )
         except Exception as exc:  # noqa: BLE001
@@ -487,12 +493,12 @@ def stream_chat_with_tools(
     )
     yield {
         "type": "status",
-        "message": t("status.tool_limit_reached"),
+        "message": t("status.tool_limit_reached", lang=language),
     }
     messages.append(
         Message(
             role="user",
-            content=get_prompt("tool_limit_instruction"),
+            content=get_prompt("tool_limit_instruction", lang=language),
         )
     )
     t0 = time.time()
@@ -502,6 +508,7 @@ def stream_chat_with_tools(
             messages=messages,
             tools=effective_tools,
             think=effective_think,
+            options=options or None,
             stream=True,
         )
     except Exception as exc:  # noqa: BLE001
@@ -529,12 +536,21 @@ async def astream_chat_with_tools(
     registry: ToolRegistry | None = None,
     host: str | None = None,
     capabilities: set[str] | None = None,
+    options: dict[str, Any] | None = None,
+    language: str | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
     """Async wrapper that yields events from ``stream_chat_with_tools``."""
     import anyio
 
     gen = stream_chat_with_tools(
-        messages, model, think=think, registry=registry, host=host, capabilities=capabilities
+        messages,
+        model,
+        think=think,
+        registry=registry,
+        host=host,
+        capabilities=capabilities,
+        options=options,
+        language=language,
     )
 
     def _next() -> dict[str, Any] | None:

@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>ollama-web</title>
   <link rel="stylesheet" href="{{ url_for('static', path='style.css') }}" />
+  <link rel="stylesheet" href="{{ url_for('static', path='settings.css') }}" />
   <link rel="stylesheet" href="{{ url_for('static', path='vendor/github-dark.min.css') }}" />
   <link rel="stylesheet" href="{{ url_for('static', path='vendor/katex.min.css') }}" />
   <script src="{{ url_for('static', path='vendor/marked.min.js') }}"></script>
@@ -22,6 +23,7 @@
     </div>
     <ul id="session-list"></ul>
     <div class="sidebar-footer">
+      <button id="general-settings-btn" type="button">{{ t('chat.general_settings') }}</button>
       <button id="mcp-settings-btn" type="button">{{ t('chat.mcp_settings') }}</button>
     </div>
   </aside>
@@ -67,6 +69,111 @@
     </form>
   </div>
 
+  <div id="settings-modal" class="modal" aria-hidden="true">
+    <div class="modal-content settings-modal-content" role="dialog" aria-modal="true"
+         aria-labelledby="settings-modal-title">
+      <div class="modal-header">
+        <div class="settings-heading">
+          <button id="settings-back-btn" type="button" class="settings-back-btn"
+                  aria-label="{{ t('settings.back') }}">&larr;</button>
+          <h2 id="settings-modal-title">{{ t('settings.general.title') }}</h2>
+        </div>
+        <button id="settings-modal-close" type="button" class="close-btn"
+                aria-label="{{ t('common.close') }}">&times;</button>
+      </div>
+      <div class="modal-body">
+        <section class="settings-screen" data-settings-screen="general">
+          <p class="modal-help">{{ t('settings.general.description') }}</p>
+          <div class="settings-menu">
+            <button id="open-ui-settings" type="button" class="settings-menu-card">
+              <strong>{{ t('settings.ui.title') }}</strong>
+              <span>{{ t('settings.ui.description') }}</span>
+            </button>
+            <button id="open-ollama-settings" type="button" class="settings-menu-card">
+              <strong>{{ t('settings.ollama.title') }}</strong>
+              <span>{{ t('settings.ollama.description') }}</span>
+            </button>
+          </div>
+        </section>
+
+        <section class="settings-screen" data-settings-screen="ui" hidden>
+          <label class="settings-field" for="settings-language">
+            <span>{{ t('settings.ui.language') }}</span>
+            <select id="settings-language">
+              <option value="ja">日本語</option>
+              <option value="en">English</option>
+            </select>
+          </label>
+          <p class="field-help">{{ t('settings.ui.reload_notice') }}</p>
+        </section>
+
+        <section class="settings-screen" data-settings-screen="ollama" hidden>
+          <label class="settings-field" for="settings-system-prompt">
+            <span>{{ t('settings.ollama.system_prompt') }}</span>
+            <textarea id="settings-system-prompt" rows="7"
+                      placeholder="{{ t('settings.ollama.system_prompt_placeholder') }}"></textarea>
+          </label>
+
+          <label class="settings-field" for="settings-temperature">
+            <span>{{ t('settings.ollama.temperature') }}: <output id="temperature-value">0.8</output></span>
+            <input id="settings-temperature" type="range" min="0" max="2" step="0.1" value="0.8" />
+          </label>
+
+          <label class="settings-field" for="settings-num-ctx">
+            <span>{{ t('settings.ollama.num_ctx') }}: <output id="num-ctx-value">8k</output></span>
+            <input id="settings-num-ctx" type="range" min="0" max="6" step="1" value="1" />
+            <div class="range-labels" aria-hidden="true">
+              <span>4k</span><span>8k</span><span>16k</span><span>32k</span>
+              <span>64k</span><span>128k</span><span>256k</span>
+            </div>
+          </label>
+
+          <div class="settings-field">
+            <span>{{ t('settings.ollama.seed') }}</span>
+            <div class="seed-controls">
+              <select id="settings-seed-mode" aria-label="{{ t('settings.ollama.seed_mode') }}">
+                <option value="random">{{ t('settings.ollama.seed_random') }}</option>
+                <option value="fixed">{{ t('settings.ollama.seed_fixed') }}</option>
+              </select>
+              <input id="settings-seed" type="number" step="1"
+                     aria-label="{{ t('settings.ollama.seed_value') }}" hidden />
+            </div>
+          </div>
+
+          <details class="advanced-settings">
+            <summary>{{ t('settings.ollama.advanced') }}</summary>
+            <p class="field-help">{{ t('settings.ollama.blank_omitted') }}</p>
+            <div class="option-grid">
+              <label class="settings-field"><span>num_keep</span><input data-option="num_keep" data-type="int" type="number" step="1" /></label>
+              <label class="settings-field"><span>num_predict</span><input data-option="num_predict" data-type="int" type="number" step="1" /></label>
+              <label class="settings-field"><span>top_k</span><input data-option="top_k" data-type="int" type="number" step="1" /></label>
+              <label class="settings-field"><span>top_p</span><input data-option="top_p" data-type="float" type="number" step="any" /></label>
+              <label class="settings-field"><span>min_p</span><input data-option="min_p" data-type="float" type="number" step="any" /></label>
+              <label class="settings-field"><span>typical_p</span><input data-option="typical_p" data-type="float" type="number" step="any" /></label>
+              <label class="settings-field"><span>tfs_z</span><input data-option="tfs_z" data-type="float" type="number" step="any" /></label>
+              <label class="settings-field"><span>repeat_last_n</span><input data-option="repeat_last_n" data-type="int" type="number" step="1" /></label>
+              <label class="settings-field"><span>repeat_penalty</span><input data-option="repeat_penalty" data-type="float" type="number" step="any" /></label>
+              <label class="settings-field"><span>presence_penalty</span><input data-option="presence_penalty" data-type="float" type="number" step="any" /></label>
+              <label class="settings-field"><span>frequency_penalty</span><input data-option="frequency_penalty" data-type="float" type="number" step="any" /></label>
+              <label class="settings-field"><span>mirostat</span><input data-option="mirostat" data-type="int" type="number" step="1" /></label>
+              <label class="settings-field"><span>mirostat_tau</span><input data-option="mirostat_tau" data-type="float" type="number" step="any" /></label>
+              <label class="settings-field"><span>mirostat_eta</span><input data-option="mirostat_eta" data-type="float" type="number" step="any" /></label>
+            </div>
+            <label class="settings-field" for="settings-stop">
+              <span>stop</span>
+              <textarea id="settings-stop" rows="4"
+                        placeholder="{{ t('settings.ollama.stop_placeholder') }}"></textarea>
+            </label>
+          </details>
+        </section>
+        <div id="settings-status" class="settings-status" role="status" aria-live="polite"></div>
+      </div>
+      <div id="settings-modal-footer" class="modal-footer" hidden>
+        <button id="settings-save-btn" type="button">{{ t('common.save') }}</button>
+      </div>
+    </div>
+  </div>
+
   <div id="mcp-modal" class="modal">
     <div class="modal-content">
       <div class="modal-header">
@@ -85,6 +192,7 @@
 
   <script src="{{ url_for('static', path='tools.js') }}"></script>
   <script src="{{ url_for('static', path='mcp.js') }}"></script>
+  <script src="{{ url_for('static', path='settings-actions.js') }}"></script>
   <script src="{{ url_for('static', path='app.js') }}"></script>
 </body>
 </html>
