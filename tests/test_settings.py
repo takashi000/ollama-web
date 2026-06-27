@@ -122,6 +122,12 @@ def test_settings_api_and_page_elements(tmp_path: Path) -> None:
             assert 'data-settings-screen="general"' in html
             assert 'data-settings-screen="ui"' in html
             assert 'data-settings-screen="ollama"' in html
+            num_keep = (
+                'data-option="num_keep" data-type="int" type="number" '
+                'step="1" placeholder="24"'
+            )
+            assert num_keep in html
+            assert "&lt;|eot_id|&gt;" in html
             assert html.index('id="general-settings-btn"') < html.index('id="mcp-settings-btn"')
     finally:
         settings.data_dir = original_data_dir

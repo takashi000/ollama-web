@@ -125,7 +125,7 @@
       "seed_value": "seed固定値",
       "advanced": "詳細設定",
       "blank_omitted": "空欄の項目はOllamaへ送信されません。",
-      "stop_placeholder": "停止文字列を1行に1件入力"
+      "stop_placeholder": "入力例（1行に1件）:\n<|eot_id|>\n<|end_of_text|>"
     },
     "messages": {
       "load_failed": "設定の読み込みに失敗しました。",

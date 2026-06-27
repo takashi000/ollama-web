@@ -144,20 +144,20 @@
             <summary>{{ t('settings.ollama.advanced') }}</summary>
             <p class="field-help">{{ t('settings.ollama.blank_omitted') }}</p>
             <div class="option-grid">
-              <label class="settings-field"><span>num_keep</span><input data-option="num_keep" data-type="int" type="number" step="1" /></label>
-              <label class="settings-field"><span>num_predict</span><input data-option="num_predict" data-type="int" type="number" step="1" /></label>
-              <label class="settings-field"><span>top_k</span><input data-option="top_k" data-type="int" type="number" step="1" /></label>
-              <label class="settings-field"><span>top_p</span><input data-option="top_p" data-type="float" type="number" step="any" /></label>
-              <label class="settings-field"><span>min_p</span><input data-option="min_p" data-type="float" type="number" step="any" /></label>
-              <label class="settings-field"><span>typical_p</span><input data-option="typical_p" data-type="float" type="number" step="any" /></label>
-              <label class="settings-field"><span>tfs_z</span><input data-option="tfs_z" data-type="float" type="number" step="any" /></label>
-              <label class="settings-field"><span>repeat_last_n</span><input data-option="repeat_last_n" data-type="int" type="number" step="1" /></label>
-              <label class="settings-field"><span>repeat_penalty</span><input data-option="repeat_penalty" data-type="float" type="number" step="any" /></label>
-              <label class="settings-field"><span>presence_penalty</span><input data-option="presence_penalty" data-type="float" type="number" step="any" /></label>
-              <label class="settings-field"><span>frequency_penalty</span><input data-option="frequency_penalty" data-type="float" type="number" step="any" /></label>
-              <label class="settings-field"><span>mirostat</span><input data-option="mirostat" data-type="int" type="number" step="1" /></label>
-              <label class="settings-field"><span>mirostat_tau</span><input data-option="mirostat_tau" data-type="float" type="number" step="any" /></label>
-              <label class="settings-field"><span>mirostat_eta</span><input data-option="mirostat_eta" data-type="float" type="number" step="any" /></label>
+              <label class="settings-field"><span>num_keep</span><input data-option="num_keep" data-type="int" type="number" step="1" placeholder="24" /></label>
+              <label class="settings-field"><span>num_predict</span><input data-option="num_predict" data-type="int" type="number" step="1" placeholder="512" /></label>
+              <label class="settings-field"><span>top_k</span><input data-option="top_k" data-type="int" type="number" step="1" placeholder="40" /></label>
+              <label class="settings-field"><span>top_p</span><input data-option="top_p" data-type="float" type="number" step="any" placeholder="0.9" /></label>
+              <label class="settings-field"><span>min_p</span><input data-option="min_p" data-type="float" type="number" step="any" placeholder="0.05" /></label>
+              <label class="settings-field"><span>typical_p</span><input data-option="typical_p" data-type="float" type="number" step="any" placeholder="0.7" /></label>
+              <label class="settings-field"><span>tfs_z</span><input data-option="tfs_z" data-type="float" type="number" step="any" placeholder="1.0" /></label>
+              <label class="settings-field"><span>repeat_last_n</span><input data-option="repeat_last_n" data-type="int" type="number" step="1" placeholder="64" /></label>
+              <label class="settings-field"><span>repeat_penalty</span><input data-option="repeat_penalty" data-type="float" type="number" step="any" placeholder="1.1" /></label>
+              <label class="settings-field"><span>presence_penalty</span><input data-option="presence_penalty" data-type="float" type="number" step="any" placeholder="0.0" /></label>
+              <label class="settings-field"><span>frequency_penalty</span><input data-option="frequency_penalty" data-type="float" type="number" step="any" placeholder="0.0" /></label>
+              <label class="settings-field"><span>mirostat</span><input data-option="mirostat" data-type="int" type="number" step="1" placeholder="0" /></label>
+              <label class="settings-field"><span>mirostat_tau</span><input data-option="mirostat_tau" data-type="float" type="number" step="any" placeholder="5.0" /></label>
+              <label class="settings-field"><span>mirostat_eta</span><input data-option="mirostat_eta" data-type="float" type="number" step="any" placeholder="0.1" /></label>
             </div>
             <label class="settings-field" for="settings-stop">
               <span>stop</span>

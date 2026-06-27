@@ -125,7 +125,7 @@
       "seed_value": "Fixed seed value",
       "advanced": "Advanced settings",
       "blank_omitted": "Blank options are not sent to Ollama.",
-      "stop_placeholder": "Enter one stop sequence per line"
+      "stop_placeholder": "Example (one per line):\n<|eot_id|>\n<|end_of_text|>"
     },
     "messages": {
       "load_failed": "Failed to load settings.",
