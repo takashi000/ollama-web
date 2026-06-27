@@ -3,6 +3,7 @@
 const form = document.getElementById("login-form");
 const pinInput = document.getElementById("pin-input");
 const errorEl = document.getElementById("login-error");
+const ALLOWED_NEXT_PATHS = new Set(["/", "/chat", "/settings"]);
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -16,6 +17,7 @@ form.addEventListener("submit", async (event) => {
     errorEl.textContent = "PINが違います";
     return;
   }
-  const next = new URLSearchParams(window.location.search).get("next") || "/";
-  window.location.assign(next.startsWith("/") ? next : "/");
+  const requestedNext = new URLSearchParams(window.location.search).get("next") || "/";
+  const safeNext = ALLOWED_NEXT_PATHS.has(requestedNext) ? requestedNext : "/";
+  window.location.assign(safeNext);
 });
