@@ -38,6 +38,7 @@ class NoCacheStaticFiles(StaticFiles):
         response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
         return response
 
+
 _STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 
@@ -47,9 +48,7 @@ def create_app() -> Starlette:
     log_path = Path(settings.data_dir).resolve().parent / "server.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
     handler = logging.FileHandler(str(log_path), encoding="utf-8")
-    handler.setFormatter(
-        logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-    )
+    handler.setFormatter(logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s"))
     root = logging.getLogger()
     root.setLevel(logging.INFO)
     root.addHandler(handler)
@@ -63,7 +62,7 @@ def create_app() -> Starlette:
         Route("/api/chat", chat_route.chat, methods=["POST"], name="chat"),
         Route("/api/models", models_route.get_models, methods=["GET"], name="models"),
         Route(
-            "/api/models/{model}/capabilities",
+            "/api/models/{model:path}/capabilities",
             models_route.get_model_capabilities,
             methods=["GET"],
             name="model_capabilities",
