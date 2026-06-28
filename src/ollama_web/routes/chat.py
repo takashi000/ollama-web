@@ -8,6 +8,7 @@ import inspect
 import json
 import logging
 from collections.abc import AsyncIterator
+from datetime import datetime
 from typing import Any
 
 from ollama import Message
@@ -35,9 +36,15 @@ def _limit_text(text: str, limit: int) -> str:
 
 
 def _compose_system_prompt(language: str, custom_prompt: str) -> str:
-    """Combine the localized built-in tool prompt with the user prompt."""
+    """Combine the localized built-in tool prompt, current time, and user prompt."""
     tool_prompt = get_prompt("tool_system", lang=language)
-    return f"{tool_prompt}\n\n{custom_prompt}" if custom_prompt else tool_prompt
+    time_line = get_prompt("current_time", lang=language).format(
+        time=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    )
+    parts = [tool_prompt, time_line]
+    if custom_prompt:
+        parts.append(custom_prompt)
+    return "\n\n".join(parts)
 
 
 def _parse_messages(raw: list[dict[str, Any]]) -> list[Message]:

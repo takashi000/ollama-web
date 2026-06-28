@@ -135,10 +135,16 @@ def test_settings_api_and_page_elements(tmp_path: Path) -> None:
 
 def test_system_prompt_is_localized_and_appended() -> None:
     custom = "Always answer briefly."
-    assert _compose_system_prompt("en", "") == get_prompt("tool_system", lang="en")
-    assert _compose_system_prompt("en", custom) == (
-        f"{get_prompt('tool_system', lang='en')}\n\n{custom}"
-    )
+    # An empty custom prompt yields only the tool prompt plus the current time line.
+    empty = _compose_system_prompt("en", "")
+    assert empty.startswith(get_prompt("tool_system", lang="en"))
+    assert get_prompt("current_time", lang="en").split("{time}")[0].rstrip() in empty
+
+    # A custom prompt is appended after the tool prompt and current time line.
+    composed = _compose_system_prompt("en", custom)
+    assert composed.startswith(get_prompt("tool_system", lang="en"))
+    assert composed.endswith(custom)
+    assert get_prompt("current_time", lang="en").split("{time}")[0].rstrip() in composed
 
 
 def test_options_are_forwarded_to_tool_and_final_rounds(monkeypatch: pytest.MonkeyPatch) -> None:

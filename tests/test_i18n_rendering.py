@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 from bs4 import BeautifulSoup
@@ -11,20 +12,39 @@ from starlette.testclient import TestClient
 from ollama_web.app import create_app
 from ollama_web.config import settings
 from ollama_web.i18n import get_messages, t
+from ollama_web.settings_store import save_app_settings
 
 
 @pytest.fixture
-def reset_language():
-    """Reset language to the initial value after each test."""
-    original = settings.language
-    yield
-    settings.language = original
+def reset_language(tmp_path):
+    """Reset language and data_dir to their initial values after each test."""
+    original_language = settings.language
+    original_data_dir = settings.data_dir
+    settings.data_dir = str(tmp_path)
+    yield tmp_path
+    settings.language = original_language
+    settings.data_dir = original_data_dir
     if hasattr(get_messages, "cache_clear"):
         get_messages.cache_clear()
 
 
-def _render_index() -> str:
+def _write_settings(data_dir: Path, language: str) -> None:
+    """Persist a minimal settings file with the requested UI language."""
+    save_app_settings(
+        data_dir,
+        {
+            "ui": {"language": language},
+            "ollama": {
+                "system_prompt": "",
+                "options": {"temperature": 0.8, "num_ctx": 8192},
+            },
+        },
+    )
+
+
+def _render_index(data_dir: Path, language: str) -> str:
     """Render index.html and return the HTML body."""
+    _write_settings(data_dir, language)
     app = create_app()
     with TestClient(app) as client:
         response = client.post("/api/auth/login", json={"pin": settings.pin})
@@ -33,8 +53,9 @@ def _render_index() -> str:
         return response.text
 
 
-def _render_pages():
+def _render_pages(data_dir: Path, language: str):
     """Render login and authenticated index pages with their response headers."""
+    _write_settings(data_dir, language)
     app = create_app()
     with TestClient(app) as client:
         login_page = client.get("/login")
@@ -45,9 +66,9 @@ def _render_pages():
 
 
 def test_english_language_consistency(reset_language):
-    """When settings.language='en', all UI text including MCP must be English."""
-    settings.language = "en"
-    html = _render_index()
+    """When persisted language='en', all UI text including MCP must be English."""
+    data_dir = reset_language
+    html = _render_index(data_dir, "en")
     # HTML-side labels
     assert 'lang="en"' in html
     assert "MCP Settings" in html
@@ -62,9 +83,9 @@ def test_english_language_consistency(reset_language):
 
 
 def test_japanese_language_consistency(reset_language):
-    """When settings.language='ja', all UI text including MCP must be Japanese."""
-    settings.language = "ja"
-    html = _render_index()
+    """When persisted language='ja', all UI text including MCP must be Japanese."""
+    data_dir = reset_language
+    html = _render_index(data_dir, "ja")
     # HTML-side labels
     assert 'lang="ja"' in html
     assert "MCP設定" in html
@@ -101,8 +122,8 @@ def test_browser_messages_are_embedded_as_json_data(
     login_title: str,
 ):
     """Both pages expose parseable localized data without executable inline scripts."""
-    settings.language = lang
-    login_page, index_page = _render_pages()
+    data_dir = reset_language
+    login_page, index_page = _render_pages(data_dir, lang)
 
     for response in (login_page, index_page):
         soup = BeautifulSoup(response.text, "html.parser")
@@ -121,7 +142,8 @@ def test_browser_messages_are_embedded_as_json_data(
 
 def test_i18n_pages_keep_strict_script_csp(reset_language):
     """The localization transport must not require weakening script-src."""
-    login_page, index_page = _render_pages()
+    data_dir = reset_language
+    login_page, index_page = _render_pages(data_dir, settings.language)
 
     for response in (login_page, index_page):
         csp = response.headers["content-security-policy"]

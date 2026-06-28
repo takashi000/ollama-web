@@ -106,5 +106,6 @@ def test_get_prompt_returns_expected_strings():
     """Basic sanity checks for the get_prompt() helper."""
     assert prompts.get_prompt("tool_system") == prompts.get_prompts("ja")["tool_system"]
     assert prompts.get_prompt("tool_system", lang="en") == prompts.get_prompts("en")["tool_system"]
+    assert prompts.get_prompt("current_time", lang="ja") == prompts.get_prompts("ja")["current_time"]
     assert prompts.get_prompt("missing.prompt", fallback="fallback") == "fallback"
     assert prompts.get_prompt("missing.prompt") == "missing.prompt"

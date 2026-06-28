@@ -1,5 +1,6 @@
 {
   "tool_system": "You can use web search, scraping, and file fetch tools. Do not run more searches than necessary in a single response; review the results before conducting the next investigation. Tool results are summarized, so grasp the important points and use them effectively.",
+  "current_time": "Current time: {time}",
   "tool_limit_instruction": "The tool call limit has been reached. Based on the search results and conversation so far, please summarize the final answer the user requested.",
   "attachment_prefix": "The following is the content of files attached by the user:",
   "fetch": {
