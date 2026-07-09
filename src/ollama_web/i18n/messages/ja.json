@@ -78,7 +78,9 @@
     "tool_limit_reached": "ツール呼び出し上限に達しました。これまでの調査結果を整理中…",
     "thinking": "思考プロセス",
     "executing_tool": "{label} を実行中…",
-    "running": "実行中…"
+    "running": "実行中…",
+    "empty_response": "モデルから空の応答が返されました。もう一度送信してください。",
+    "empty_response_retry": "応答が空でした。リトライ中…"
   },
   "errors": {
     "generic": "エラーが発生しました",

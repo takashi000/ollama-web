@@ -78,7 +78,9 @@
     "tool_limit_reached": "Tool call limit reached. Summarizing findings…",
     "thinking": "Thinking process",
     "executing_tool": "Executing {label}…",
-    "running": "Running…"
+    "running": "Running…",
+    "empty_response": "The model returned an empty response. Please send the message again.",
+    "empty_response_retry": "Empty response received; retrying…"
   },
   "errors": {
     "generic": "An error occurred",

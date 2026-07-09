@@ -243,19 +243,23 @@ class SessionStore:
         return session
 
     def _update_session_token_count(self, session: dict[str, Any]) -> None:
-        """Recalculate cumulative token_count for the session."""
-        total_prompt = 0
-        total_eval = 0
-        for m in session.get("messages", []):
-            tc = m.get("token_count") or {}
-            total_prompt += int(tc.get("prompt_eval_count", 0) or 0)
-            total_eval += int(tc.get("eval_count", 0) or 0)
-        if total_prompt or total_eval:
-            session["token_count"] = {
-                "prompt_eval_count": total_prompt,
-                "eval_count": total_eval,
-                "total_count": total_prompt + total_eval,
-            }
+        """Update the session token_count from the most recent assistant message.
+
+        ``prompt_eval_count`` is the input token count for the *entire* conversation
+        as seen by ollama in that response, not a per-message value.  Summing it
+        across messages would over-count massively.  We therefore keep the latest
+        assistant message's token_count as the authoritative session value.
+        """
+        messages = session.get("messages", [])
+        latest_assistant_tc = None
+        for m in reversed(messages):
+            if m.get("role") == "assistant":
+                tc = m.get("token_count")
+                if tc:
+                    latest_assistant_tc = tc
+                    break
+        if latest_assistant_tc is not None:
+            session["token_count"] = dict(latest_assistant_tc)
         else:
             session.pop("token_count", None)
 

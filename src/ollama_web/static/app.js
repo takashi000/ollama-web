@@ -714,6 +714,17 @@ async function send() {
             waiting.textContent = ev.message || t("chat.processing");
             assistantBody.appendChild(waiting);
           }
+        } else if (ev.type === "warning") {
+          gotError = true;
+          if (!placeholderCleared) {
+            assistantBody.innerHTML = "";
+            placeholderCleared = true;
+          }
+          const span = document.createElement("span");
+          span.className = "warning-msg";
+          span.style.color = "#f0883e";
+          span.textContent = ev.message || t("status.empty_response");
+          assistantBody.appendChild(span);
         } else if (ev.type === "thinking") {
           if (!thinkingBody) thinkingBody = addThinkingBubble(assistantExtras);
           thinkingBody.textContent += ev.content;

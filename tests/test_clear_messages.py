@@ -82,6 +82,7 @@ def test_add_message_stores_token_count_and_clears_it():
     assert reloaded["token_count"] == {
         "prompt_eval_count": 120,
         "eval_count": 80,
+        "num_ctx": 8192,
         "total_count": 200,
     }
 

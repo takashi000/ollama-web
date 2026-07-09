@@ -393,6 +393,9 @@ def stream_chat_with_tools(
 
     cumulative_tool_chars = 0
 
+    MAX_EMPTY_RETRIES = 2
+    empty_retries = 0
+
     rounds = 0
     while rounds < MAX_TOOL_ROUNDS:
         rounds += 1
@@ -406,6 +409,7 @@ def stream_chat_with_tools(
             model,
             cumulative_tool_chars,
         )
+
         t0 = time.time()
         try:
             stream = cast(Any, raw_client).chat(
@@ -449,6 +453,35 @@ def stream_chat_with_tools(
             time.time() - t0,
         )
 
+        # Detect empty responses. Some models / proxies occasionally return a
+        # stream with almost no meaningful content. Log it and retry a few
+        # times before giving up.
+        is_empty = (
+            not full_message.get("content")
+            and not full_message.get("thinking")
+            and not tool_calls
+        )
+        if is_empty and empty_retries < MAX_EMPTY_RETRIES:
+            empty_retries += 1
+            logger.warning(
+                "ollama returned an empty stream (chunks=%d); retry %d/%d",
+                chunk_count,
+                empty_retries,
+                MAX_EMPTY_RETRIES,
+            )
+            yield {
+                "type": "status",
+                "message": t("status.empty_response_retry", lang=language),
+            }
+            # Retry the same round without consuming the tool round budget.
+            rounds -= 1
+            # Small pause to avoid hammering the upstream.
+            time.sleep(0.5)
+            continue
+        # Reset retry budget on any non-empty round so isolated hiccups are fine.
+        if not is_empty:
+            empty_retries = 0
+
         # Reconstruct the assistant message including any tool_calls so the
         # next round can see them.
         if tool_calls:
@@ -458,6 +491,12 @@ def stream_chat_with_tools(
             messages.append(msg)
 
         if not tool_calls:
+            if is_empty:
+                # Ran out of tool rounds while still empty; surface a warning.
+                yield {
+                    "type": "warning",
+                    "message": t("status.empty_response", lang=language),
+                }
             done_event = {"type": "done"}
             tokens = _token_counts(last_chunk)
             if tokens:
