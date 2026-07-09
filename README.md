@@ -1,28 +1,28 @@
 # ollama-web
 
-Ollama をブラウザから利用するためのローカル Web UI です。
+A local web UI for using Ollama from a browser.
 
-Starlette ベースの軽量なサーバーで、チャット、セッション保存、ファイル添付、Web 検索/取得ツール、PDF テキスト抽出を提供します。既定ではローカルホストのみで待ち受け、PIN ログインで UI と API を保護します。
+A lightweight Starlette-based server providing chat, session storage, file attachments, web search / fetch tools, and PDF text extraction. It listens on localhost only by default and protects the UI and API with PIN login.
 
 <img src="./docs/capture.gif" width="100%" alt="Screenshot of the chat" />
 
 ## Features
 
-- Ollama モデルとのストリーミングチャット
-- 会話セッションと添付ファイルのローカル保存
-- 画像添付のリサイズと vision モデル向け送信
-- Web 検索、URL スクレイピング、ファイル検索/取得、PDF テキスト抽出ツール
-- MCP クライアント機能：stdio / Streamable HTTP の MCP サーバーからツールを利用可能
-- PIN 認証、CSRF 保護、CSP、ローカル配布のフロントエンド依存ファイル
-- SSRF 対策付きの外部 URL 取得
+- Streaming chat with Ollama models
+- Local storage of conversation sessions and attachments
+- Image attachment resizing and sending for vision models
+- Web search, URL scraping, file search / fetch, and PDF text extraction tools
+- MCP client support: use tools from stdio / Streamable HTTP MCP servers
+- PIN authentication, CSRF protection, CSP, locally distributed frontend dependency files
+- External URL fetching with SSRF protection
 
 ## Requirements
 
 - Python 3.10+
-- Ollama が起動していること
-- `uv` 推奨
+- Ollama must be running
+- `uv` recommended
 
-既定では Ollama API を `http://127.0.0.1:11434` として扱います。
+By default, the Ollama API is accessed at `http://127.0.0.1:11434`.
 
 ## Installation
 
@@ -31,7 +31,7 @@ uv venv .venv
 uv pip install -e ".[dev]" -p .venv
 ```
 
-本番依存だけを入れる場合:
+To install only production dependencies:
 
 ```bash
 uv venv .venv
@@ -40,21 +40,21 @@ uv pip install -e . -p .venv
 
 ## Usage
 
-ローカルPCだけで利用する場合:
+For local PC use only:
 
 ```bash
 ollama-web
 ```
 
-`OLLAMA_WEB_PIN` を設定していない場合、起動時にランダムな PIN がコンソールに表示されます。ブラウザで `http://127.0.0.1:8000` を開き、その PIN でログインしてください。
+If `OLLAMA_WEB_PIN` is not set, a random PIN will be printed to the console on startup. Open `http://127.0.0.1:8000` in your browser and log in with that PIN.
 
-LAN 内のスマホなど別端末からアクセスする場合:
+To access from another device on the LAN, such as a smartphone:
 
 ```bash
 OLLAMA_WEB_PIN=123456 OLLAMA_WEB_HOST=0.0.0.0 ollama-web
 ```
 
-PowerShell では次のように指定します。
+In PowerShell, set the variables as follows:
 
 ```powershell
 $env:OLLAMA_WEB_PIN = "123456"
@@ -66,47 +66,47 @@ ollama-web
 
 | Environment variable | Default | Description |
 | --- | --- | --- |
-| `OLLAMA_HOST` | `http://127.0.0.1:11434` | 接続先 Ollama API |
-| `OLLAMA_WEB_MODEL` | `llama3.2` | 既定で選択するモデル |
-| `OLLAMA_WEB_HOST` | `127.0.0.1` | Web UI の待受ホスト |
-| `OLLAMA_WEB_PORT` | `8000` | Web UI の待受ポート |
-| `OLLAMA_WEB_DATA_DIR` | `data` | セッションと添付ファイルの保存先 |
-| `OLLAMA_WEB_MAX_UPLOAD_MB` | `20` | アップロードファイルの上限サイズ |
-| `OLLAMA_WEB_PIN` | 起動時に自動生成 | ログイン用 PIN |
-| `OLLAMA_WEB_SECRET_KEY` | 起動時に自動生成 | Cookie 署名鍵 |
-| `OLLAMA_WEB_ALLOWED_ORIGINS` | 未設定 | CORS 許可オリジンのカンマ区切り |
-| `OLLAMA_WEB_MCP_STDIO_ALLOWLIST` | 未設定 | stdio MCP で起動を許可する実行ファイル絶対パスのカンマ区切り |
-| `OLLAMA_WEB_MCP_HTTPS_ALLOWLIST` | 未設定 | remote HTTPS MCP 接続を許可するホスト名のカンマ区切り |
-| `OLLAMA_WEB_LANGUAGE` | `ja` | UI と LLM プロンプトの表示言語（`ja` または `en`） |
+| `OLLAMA_HOST` | `http://127.0.0.1:11434` | Target Ollama API |
+| `OLLAMA_WEB_MODEL` | `llama3.2` | Default model to select |
+| `OLLAMA_WEB_HOST` | `127.0.0.1` | Host the web UI listens on |
+| `OLLAMA_WEB_PORT` | `8000` | Port the web UI listens on |
+| `OLLAMA_WEB_DATA_DIR` | `data` | Directory for sessions and attachments |
+| `OLLAMA_WEB_MAX_UPLOAD_MB` | `20` | Maximum upload file size in MB |
+| `OLLAMA_WEB_PIN` | Generated automatically on startup | PIN for login |
+| `OLLAMA_WEB_SECRET_KEY` | Generated automatically on startup | Cookie signing key |
+| `OLLAMA_WEB_ALLOWED_ORIGINS` | Not set | Comma-separated list of allowed CORS origins |
+| `OLLAMA_WEB_MCP_STDIO_ALLOWLIST` | Not set | Comma-separated absolute paths of executable files allowed for stdio MCP |
+| `OLLAMA_WEB_MCP_HTTPS_ALLOWLIST` | Not set | Comma-separated hostnames allowed for remote HTTPS MCP connections |
+| `OLLAMA_WEB_LANGUAGE` | `ja` | Display language for the UI and LLM prompts (`ja` or `en`) |
 
-### 多言語対応
+### Multilingual Support
 
-UI 文言と LLM プロンプトは、それぞれ `src/ollama_web/i18n/messages/` と `src/ollama_web/prompts/` の JSON ファイルで管理されています。既定は日本語（`ja`）です。新しい言語を追加する場合は、同じディレクトリに `{lang}.json` を作成し、`OLLAMA_WEB_LANGUAGE` をその言語コードに設定してください。
+UI text and LLM prompts are managed by JSON files in `src/ollama_web/i18n/messages/` and `src/ollama_web/prompts/`, respectively. The default is Japanese (`ja`). To add a new language, create `{lang}.json` in the same directories and set `OLLAMA_WEB_LANGUAGE` to that language code.
 
-### 一般設定
+### General Settings
 
-ブラウザの左ペイン下部にある「一般設定」から、表示言語、システムプロンプト、Ollama の生成Optionsを変更できます。設定は `OLLAMA_WEB_DATA_DIR/settings.json` に保存され、このデータディレクトリを利用する全セッションで共有されます。
+You can change the display language, system prompt, and Ollama generation options from "General Settings" at the bottom of the left pane in the browser. Settings are saved to `OLLAMA_WEB_DATA_DIR/settings.json` and shared across all sessions that use this data directory.
 
-保存済みの表示言語は `OLLAMA_WEB_LANGUAGE` より優先されます。システムプロンプトは内蔵のTool用プロンプトの後に追加され、空欄の詳細Optionsと乱数モードの `seed` はOllamaへ送信されません。
+The saved display language takes precedence over `OLLAMA_WEB_LANGUAGE`. The system prompt is appended after the built-in tool prompt. Empty detailed options and the random seed in random mode are not sent to Ollama.
 
-### MCP サーバー設定
+### MCP Server Configuration
 
-`data/mcpServers.json` に接続先 MCP サーバーを記述します。ブラウザの左ペイン下部「MCP設定」からも編集・保存できます。
+MCP server connections are described in `data/mcpServers.json`. You can also edit and save them from "MCP Settings" at the bottom of the left pane in the browser.
 
-MCP は外部プログラムや外部サーバーの Tool を LLM へ公開する機能です。安全のため、登録できるサーバーと自動実行できる Tool には制限があります。
+MCP is a feature that exposes tools from external programs or external servers to the LLM. For security, there are restrictions on which servers can be registered and which tools can be executed automatically.
 
-#### stdio MCP を使う場合
+#### Using stdio MCP
 
-stdio MCP は既定では起動できません。`command` に指定する実行ファイルの絶対パスを、先に `OLLAMA_WEB_MCP_STDIO_ALLOWLIST` へ登録してください。
+stdio MCP cannot be started by default. Register the absolute path of the executable specified in `command` in `OLLAMA_WEB_MCP_STDIO_ALLOWLIST` first.
 
-PowerShell の例：
+PowerShell example:
 
 ```powershell
 $env:OLLAMA_WEB_MCP_STDIO_ALLOWLIST = "C:\Users\you\src\python\ollama-web\.venv\Scripts\python.exe"
 ollama-web
 ```
 
-`mcpServers.json` の例：
+Example `mcpServers.json`:
 
 ```json
 {
@@ -119,13 +119,13 @@ ollama-web
 }
 ```
 
-`OLLAMA_WEB_MCP_STDIO_ALLOWLIST` で許可するのは、`args` に渡すスクリプトではなく `command` の実行ファイルです。たとえば `python.exe` で `scripts/my_server.py` を起動する場合も、allowlist へ登録するのは `python.exe` の絶対パスです。
+What should be allowed in `OLLAMA_WEB_MCP_STDIO_ALLOWLIST` is the executable in `command`, not the script passed in `args`. For example, when launching `scripts/my_server.py` with `python.exe`, register the absolute path of `python.exe` in the allowlist.
 
-`cwd` 未指定時は ollama-webの起動パスが作業ディレクトリとなります。
+When `cwd` is not specified, the working directory is the path from which ollama-web was launched.
 
-#### Streamable HTTP MCP を使う場合
+#### Using Streamable HTTP MCP
 
-ローカルの HTTP MCP は `http://127.0.0.1` または `http://localhost` のみ許可されます。
+Local HTTP MCP is allowed only for `http://127.0.0.1` or `http://localhost`.
 
 ```json
 {
@@ -141,7 +141,7 @@ ollama-web
 }
 ```
 
-remote HTTPS MCP を使う場合は、接続先ホスト名を `OLLAMA_WEB_MCP_HTTPS_ALLOWLIST` に登録してください。
+For remote HTTPS MCP, register the destination hostname in `OLLAMA_WEB_MCP_HTTPS_ALLOWLIST`.
 
 ```powershell
 $env:OLLAMA_WEB_MCP_HTTPS_ALLOWLIST = "mcp.example.com"
@@ -161,32 +161,30 @@ ollama-web
 }
 ```
 
-plain HTTP のリモートサーバー、private IP、metadata IP は拒否されます。
+Plain HTTP remote servers, private IPs, and metadata IPs are rejected.
 
-#### MCP Tool 名と secret の扱い
+#### MCP Tool Names and Handling of Secrets
 
-Server 名と Tool 名には英数字、`_`、`-` のみ使えます。`__` は内部の名前空間区切りとして使うため指定できません。
+Server names and tool names may only contain alphanumeric characters, `_`, and `-`. `__` is reserved as an internal namespace separator and cannot be used.
 
-Tool 名に `delete`、`write`、`run`、`shell`、`secret` など危険操作を示す語が含まれる場合、その Tool は確認なしには実行されません。現時点では UI の承認フローはなく、該当 Tool は拒否されます。
+In GET responses from the MCP settings API, secret-like values in `env` / `headers` are masked as `***`. Tool execution results and errors are also quarantined as untrusted data before being passed to the LLM.
 
-MCP 設定 API の GET 応答では、`env` / `headers` 内の secret らしい値は `***` にマスクされます。Tool の実行結果やエラーも LLM へ渡す前に不信データとして隔離されます。
-
-`scripts/` 以下には動作確認用の MCP サーバーが用意されています。
+Example MCP servers for testing are provided under `scripts/`.
 
 ```bash
-# stdio モードで起動
+# Launch in stdio mode
 python scripts/calc_server.py
 
-# Streamable HTTP モードで起動（既定ポート 9000）
+# Launch in Streamable HTTP mode (default port 9000)
 python scripts/calc_server.py streamable-http
 
-# ポートを明示して起動（ollama-web の 8000 と衝突しないように）
+# Launch with an explicit port (avoid colliding with ollama-web on 8000)
 python scripts/calc_server.py streamable-http 9001
 ```
 
-対応パラメータ：
+Supported parameters:
 
-| Transport | 必須 | 任意 |
+| Transport | Required | Optional |
 | --- | --- | --- |
 | stdio | `command` | `args`, `env`, `cwd`, `encoding`, `encoding_error_handler` |
 | Streamable HTTP | `url` | `headers`, `timeout`, `sse_read_timeout`, `terminate_on_close` |
@@ -194,26 +192,26 @@ python scripts/calc_server.py streamable-http 9001
 
 ### Security Notes
 
-- 既定の待受は `127.0.0.1` です。LAN に公開する場合だけ `OLLAMA_WEB_HOST=0.0.0.0` を明示してください。
-- `OLLAMA_WEB_PIN` 未設定時の PIN は起動ごとに変わります。継続利用する場合は固定値を設定してください。
-- CORS は既定で無効です。外部オリジンから API を呼ぶ必要がある場合のみ `OLLAMA_WEB_ALLOWED_ORIGINS` を設定してください。
-- Web 取得系ツールは localhost/private IP/metadata IP へのアクセスを拒否します。
-- MCP の stdio transport は allowlist 未設定では拒否されます。Tool 名や Server 名は安全な英数字/`_`/`-` のみ許可され、危険名の MCP Tool は確認なしには実行されません。
+- The default listen host is `127.0.0.1`. Set `OLLAMA_WEB_HOST=0.0.0.0` only when exposing to the LAN.
+- When `OLLAMA_WEB_PIN` is not set, the PIN changes on each startup. Set a fixed value for continued use.
+- CORS is disabled by default. Set `OLLAMA_WEB_ALLOWED_ORIGINS` only when the API needs to be called from an external origin.
+- Web fetching tools reject access to localhost / private IPs / metadata IPs.
+- MCP stdio transport is rejected when the allowlist is not configured.
 
 ## Development
 
 ```bash
-# テスト
+# Tests
 pytest
 
 # Lint
 ruff check .
 
-# 型チェック
+# Type check
 mypy src/
 ```
 
-このリポジトリでは `pyproject.toml` に pytest、ruff、mypy の設定をまとめています。
+This repository keeps pytest, ruff, and mypy configurations in `pyproject.toml`.
 
 
 ## License
