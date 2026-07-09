@@ -5,7 +5,8 @@
     "clear": "クリア",
     "save": "保存",
     "delete": "削除",
-    "close": "閉じる"
+    "close": "閉じる",
+    "copy": "コピー"
   },
   "chat": {
     "sessions": "セッション",
@@ -14,6 +15,7 @@
     "general_settings": "一般設定",
     "mcp_settings": "MCP設定",
     "model_label": "モデル:",
+    "token_count": "トークン数",
     "attach_file": "ファイルを添付",
     "input_placeholder": "メッセージを入力… (Enter で送信 / Shift+Enter で改行)",
     "no_sessions": "セッションがありません",

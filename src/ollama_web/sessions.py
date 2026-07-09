@@ -89,13 +89,17 @@ class ChatMessage:
     role: str
     content: str
     attachments: list[str] = field(default_factory=list)
+    token_count: dict[str, int] | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        out = {
             "role": self.role,
             "content": self.content,
             "attachments": list(self.attachments),
         }
+        if self.token_count is not None:
+            out["token_count"] = dict(self.token_count)
+        return out
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> ChatMessage:
@@ -103,6 +107,7 @@ class ChatMessage:
             role=data.get("role", "user"),
             content=data.get("content", ""),
             attachments=list(data.get("attachments", [])),
+            token_count=data.get("token_count"),
         )
 
 
@@ -213,17 +218,18 @@ class SessionStore:
         role: str,
         content: str,
         attachments: list[str] | None = None,
+        token_count: dict[str, int] | None = None,
     ) -> dict[str, Any] | None:
         session = self.get(session_id)
         if session is None:
             return None
-        session["messages"].append(
-            ChatMessage(
-                role=role,
-                content=content,
-                attachments=list(attachments or []),
-            ).to_dict()
-        )
+        msg = ChatMessage(
+            role=role,
+            content=content,
+            attachments=list(attachments or []),
+            token_count=token_count,
+        ).to_dict()
+        session["messages"].append(msg)
         if role == "user" and len(session["messages"]) <= 2:
             first_user = next(
                 (m for m in session["messages"] if m["role"] == "user"),
@@ -232,8 +238,26 @@ class SessionStore:
             if first_user:
                 title = first_user["content"].strip().replace("\n", " ")[:40]
                 session["title"] = title + ("…" if len(first_user["content"]) > 40 else "")
+        self._update_session_token_count(session)
         self.save(session)
         return session
+
+    def _update_session_token_count(self, session: dict[str, Any]) -> None:
+        """Recalculate cumulative token_count for the session."""
+        total_prompt = 0
+        total_eval = 0
+        for m in session.get("messages", []):
+            tc = m.get("token_count") or {}
+            total_prompt += int(tc.get("prompt_eval_count", 0) or 0)
+            total_eval += int(tc.get("eval_count", 0) or 0)
+        if total_prompt or total_eval:
+            session["token_count"] = {
+                "prompt_eval_count": total_prompt,
+                "eval_count": total_eval,
+                "total_count": total_prompt + total_eval,
+            }
+        else:
+            session.pop("token_count", None)
 
     def add_file(
         self,
@@ -334,5 +358,6 @@ class SessionStore:
         session["messages"] = []
         session["files"] = []
         session["updated_at"] = _now()
+        session.pop("token_count", None)
         self._save(session_id, session)
         return session

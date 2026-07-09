@@ -59,3 +59,35 @@ def test_clear_messages_invalid_session_id():
 def test_clear_messages_missing_session():
     store = make_store()
     assert store.clear_messages("0" * 32) is None
+
+
+def test_add_message_stores_token_count_and_clears_it():
+    store = make_store()
+    session = store.create(title="test")
+    session_id = session["id"]
+    store.add_message(
+        session_id=session_id,
+        role="assistant",
+        content="hello",
+        token_count={
+            "prompt_eval_count": 120,
+            "eval_count": 80,
+            "num_ctx": 8192,
+            "total_count": 200,
+        },
+    )
+    reloaded = store.get(session_id)
+    assert reloaded is not None
+    assert reloaded["messages"][0]["token_count"]["prompt_eval_count"] == 120
+    assert reloaded["token_count"] == {
+        "prompt_eval_count": 120,
+        "eval_count": 80,
+        "total_count": 200,
+    }
+
+    cleared = store.clear_messages(session_id)
+    assert cleared is not None
+    assert "token_count" not in cleared
+    reloaded_after = store.get(session_id)
+    assert reloaded_after is not None
+    assert "token_count" not in reloaded_after

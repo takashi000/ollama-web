@@ -12,6 +12,7 @@ from ollama._types import ResponseError
 from ollama_web.llm import (
     _embed_images_in_content,
     _is_image_message,
+    _token_counts,
     chat_with_tools,
     stream_chat_with_tools,
 )
@@ -81,3 +82,26 @@ def test_stream_chat_with_tools_accepts_capability_set() -> None:
     )
     with pytest.raises(ResponseError):
         list(gen)
+
+
+def test_token_counts_extracts_from_dict() -> None:
+    assert _token_counts({"prompt_eval_count": 100, "eval_count": 50}) == {
+        "prompt_eval_count": 100,
+        "eval_count": 50,
+    }
+
+
+def test_token_counts_extracts_from_object() -> None:
+    class FakeResp:
+        prompt_eval_count = 200
+        eval_count = 30
+
+    assert _token_counts(FakeResp()) == {
+        "prompt_eval_count": 200,
+        "eval_count": 30,
+    }
+
+
+def test_token_counts_returns_none_when_missing() -> None:
+    assert _token_counts({}) is None
+    assert _token_counts(None) is None

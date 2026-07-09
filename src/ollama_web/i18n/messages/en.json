@@ -5,7 +5,8 @@
     "clear": "Clear",
     "save": "Save",
     "delete": "Delete",
-    "close": "Close"
+    "close": "Close",
+    "copy": "Copy"
   },
   "chat": {
     "sessions": "Sessions",
@@ -14,6 +15,7 @@
     "general_settings": "General Settings",
     "mcp_settings": "MCP Settings",
     "model_label": "Model:",
+    "token_count": "Token count",
     "attach_file": "Attach file",
     "input_placeholder": "Type a message… (Enter to send / Shift+Enter for newline)",
     "no_sessions": "No sessions",

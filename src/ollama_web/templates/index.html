@@ -34,6 +34,13 @@
       <button id="menu-btn" type="button" aria-label="{{ t('chat.session_list') }}">☰</button>
       <h1>ollama-web</h1>
       <div class="controls">
+        <div id="token-gauge" class="token-gauge" title="{{ t('chat.token_count', 'Token count') }}" aria-hidden="true" style="display:none">
+          <svg viewBox="0 0 40 40">
+            <circle class="gauge-bg" cx="20" cy="20" r="16"></circle>
+            <circle class="gauge-fg" cx="20" cy="20" r="16"></circle>
+          </svg>
+          <span class="gauge-text"></span>
+        </div>
         <label for="model-select">{{ t('chat.model_label') }}</label>
         <select id="model-select">
           {% if models %}

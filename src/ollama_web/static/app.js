@@ -22,6 +22,7 @@ let currentSession = null;
 let pendingFiles = [];
 let abortController = null;
 let currentCapabilities = new Set();
+let stickToBottom = true;
 
 function updateThinkToggleState() {
   if (!thinkToggle) return;
@@ -165,9 +166,10 @@ function highlightIn(el) {
   }
 }
 
-function addMessage(role) {
+function addMessage(role, rawText, showCopy = false) {
   const div = document.createElement("div");
   div.className = `message ${role}`;
+  div.dataset.rawText = rawText || "";
   const roleEl = document.createElement("div");
   roleEl.className = "role";
   roleEl.textContent = role === "user" ? t("roles.user") : t("roles.assistant");
@@ -180,9 +182,28 @@ function addMessage(role) {
     extras.className = "extras";
     div.appendChild(extras);
   }
+  const copyBtn = document.createElement("button");
+  copyBtn.type = "button";
+  copyBtn.className = "copy-btn";
+  copyBtn.title = t("common.copy", "Copy");
+  copyBtn.setAttribute("aria-label", t("common.copy", "Copy"));
+  copyBtn.textContent = "📋";
+  copyBtn.hidden = !showCopy;
+  copyBtn.addEventListener("click", () => {
+    const raw = div.dataset.rawText || "";
+    navigator.clipboard.writeText(raw).then(() => {
+      copyBtn.textContent = "✓";
+      setTimeout(() => {
+        copyBtn.textContent = "📋";
+      }, 1200);
+    });
+  });
+  div.appendChild(copyBtn);
   chatEl.appendChild(div);
-  chatEl.scrollTop = chatEl.scrollHeight;
-  return { body, extras };
+  if (stickToBottom) {
+    chatEl.scrollTop = chatEl.scrollHeight;
+  }
+  return { body, extras, div, copyBtn };
 }
 
 function addToolBubble(parentExtras, name, args) {
@@ -202,7 +223,9 @@ function addToolBubble(parentExtras, name, args) {
   result.className = "result";
   det.appendChild(result);
   parentExtras.appendChild(det);
-  chatEl.scrollTop = chatEl.scrollHeight;
+  if (stickToBottom) {
+    chatEl.scrollTop = chatEl.scrollHeight;
+  }
   return { det, sum, result };
 }
 
@@ -214,7 +237,9 @@ function addThinkingBubble(parentExtras) {
   const body = document.createElement("div");
   det.append(sum, body);
   parentExtras.appendChild(det);
-  chatEl.scrollTop = chatEl.scrollHeight;
+  if (stickToBottom) {
+    chatEl.scrollTop = chatEl.scrollHeight;
+  }
   return body;
 }
 
@@ -310,6 +335,7 @@ async function deleteSession(id) {
       chatEl.innerHTML = "";
       pendingFiles = [];
       renderAttachments();
+      updateTokenGauge(0, 0);
     }
     await loadSessions();
   } catch (err) {
@@ -325,8 +351,10 @@ async function selectSession(id) {
     const session = await res.json();
     currentSessionId = session.id;
     currentSession = session;
+    stickToBottom = true;
     renderSession();
     renderSessionList((await (await fetch("/api/sessions")).json()).sessions || []);
+    updateTokenGaugeFromSession();
   } catch (err) {
     console.error("failed to select session", err);
   }
@@ -342,8 +370,17 @@ function escapeHtml(text) {
 }
 
 function _renderAssistantContent(body, content) {
-  if (content && content.startsWith("[ERROR]")) {
-    const lines = content.slice(7).split("\n").filter((l) => l.trim());
+  const safeContent = content || "";
+  if (!safeContent.trim()) {
+    body.textContent = t("chat.no_response");
+    body.style.color = "var(--muted)";
+    body.style.fontStyle = "italic";
+    return;
+  }
+  body.style.color = "";
+  body.style.fontStyle = "";
+  if (safeContent.startsWith("[ERROR]")) {
+    const lines = safeContent.slice(7).split("\n").filter((l) => l.trim());
     body.innerHTML = "";
     for (const line of lines) {
       const span = document.createElement("span");
@@ -353,7 +390,7 @@ function _renderAssistantContent(body, content) {
       body.appendChild(document.createElement("br"));
     }
   } else {
-    body.innerHTML = renderMarkdown(content);
+    body.innerHTML = renderMarkdown(safeContent);
     highlightIn(body);
     renderMathIn(body);
   }
@@ -365,11 +402,16 @@ function renderSession() {
   const msgs = currentSession.messages || [];
   for (const m of msgs) {
     if (m.role === "user") {
-      const body = addMessage("user").body;
+      const { body, div } = addMessage("user", m.content || "", true);
       const content = m.content || "";
-      body.innerHTML = renderMarkdown(content);
-      highlightIn(body);
-      renderMathIn(body);
+      try {
+        body.innerHTML = renderMarkdown(content);
+        highlightIn(body);
+        renderMathIn(body);
+      } catch (renderErr) {
+        console.error("failed to render user message", renderErr);
+        body.textContent = content;
+      }
       if (m.attachments && m.attachments.length) {
         const info = document.createElement("div");
         info.style.fontSize = "12px";
@@ -383,10 +425,17 @@ function renderSession() {
           .join(", ");
         info.textContent = t("chat.attachment_label", "Attached: {names}").replace("{names}", names);
         body.appendChild(info);
+        const filesPart = t("chat.attachment_files", "Attached files: {names}").replace("{names}", names);
+        div.dataset.rawText = (m.content || "") + "\n\n" + filesPart;
       }
     } else if (m.role === "assistant") {
-      const body = addMessage("assistant").body;
-      _renderAssistantContent(body, m.content);
+      const { body } = addMessage("assistant", m.content || "", true);
+      try {
+        _renderAssistantContent(body, m.content);
+      } catch (renderErr) {
+        console.error("failed to render assistant message", renderErr);
+        body.textContent = m.content || "";
+      }
     }
   }
 }
@@ -450,6 +499,11 @@ fileInput.addEventListener("change", () => {
 
 newSessionBtn.addEventListener("click", createSession);
 
+chatEl.addEventListener("scroll", () => {
+  const threshold = 50;
+  stickToBottom = chatEl.scrollTop + chatEl.clientHeight >= chatEl.scrollHeight - threshold;
+});
+
 menuBtn.addEventListener("click", () => {
   sidebar.classList.add("open");
   sidebarBackdrop.classList.add("active");
@@ -483,28 +537,32 @@ async function send() {
   sendBtn.disabled = true;
   cancelBtn.disabled = false;
   abortController = new AbortController();
+  stickToBottom = true;
 
   const fileIds = pendingFiles.map((f) => f.id);
-  const userBody = addMessage("user").body;
   let displayContent = text;
+  let userRawText = text;
   if (pendingFiles.length) {
     const names = pendingFiles.map((f) => f.name).join(", ");
-    displayContent += (text ? "\n\n" : "") + t("chat.attachment_files", "Attached files: {names}").replace("{names}", names);
+    const filesPart = t("chat.attachment_files", "Attached files: {names}").replace("{names}", names);
+    displayContent += (text ? "\n\n" : "") + filesPart;
+    userRawText += (text ? "\n\n" : "") + filesPart;
   }
+  const { body: userBody, div: userDiv, copyBtn: userCopyBtn } = addMessage("user", userRawText);
   userBody.innerHTML = renderMarkdown(displayContent);
   highlightIn(userBody);
 
   pendingFiles = [];
   renderAttachments();
 
-  const assistantMsg = addMessage("assistant");
-  const assistantBody = assistantMsg.body;
-  const assistantExtras = assistantMsg.extras;
+  const { body: assistantBody, extras: assistantExtras, div: assistantDiv, copyBtn: assistantCopyBtn } = addMessage("assistant");
   assistantBody.textContent = "…";
   let assistantText = "";
   let thinkingBody = null;
   const pendingTools = [];
   let gotError = false;
+  let tokenCount = null;
+  let numCtx = 0;
 
   const model = modelSelect.value;
   const think = thinkToggle.checked;
@@ -530,17 +588,23 @@ async function send() {
       err.name === "AbortError"
         ? t("chat.stopped")
         : t("chat.error_prefix", "Error: {message}").replace("{message}", err.message);
+    assistantDiv.dataset.rawText = assistantBody.textContent;
+    if (assistantCopyBtn) assistantCopyBtn.hidden = false;
     abortController = null;
     cancelBtn.disabled = true;
     sendBtn.disabled = false;
+    inputEl.focus();
     return;
   }
 
   if (!res.ok || !res.body) {
     assistantBody.textContent = t("chat.error_prefix", "Error: {message}").replace("{message}", res.status);
+    assistantDiv.dataset.rawText = assistantBody.textContent;
+    if (assistantCopyBtn) assistantCopyBtn.hidden = false;
     abortController = null;
     cancelBtn.disabled = true;
     sendBtn.disabled = false;
+    inputEl.focus();
     return;
   }
 
@@ -568,7 +632,9 @@ async function send() {
     // every single token.
     assistantBody.textContent = assistantText;
     assistantBody.style.whiteSpace = "pre-wrap";
-    chatEl.scrollTop = chatEl.scrollHeight;
+    if (stickToBottom) {
+      chatEl.scrollTop = chatEl.scrollHeight;
+    }
   }
 
   function scheduleStreamUpdate() {
@@ -582,86 +648,107 @@ async function send() {
     scheduleStreamUpdate();
   }
 
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
 
-    const endIndex = buffer.lastIndexOf("\n\n");
-    if (endIndex === -1) continue;
-    const chunk = buffer.slice(0, endIndex);
-    buffer = buffer.slice(endIndex + 2);
+      const endIndex = buffer.lastIndexOf("\n\n");
+      if (endIndex === -1) continue;
+      const chunk = buffer.slice(0, endIndex);
+      buffer = buffer.slice(endIndex + 2);
 
-    for (const payload of parseSseEvent(chunk)) {
-      if (!payload.trim()) continue;
-      let ev;
-      try {
-        ev = JSON.parse(payload);
-      } catch (e) {
-        console.warn("failed to parse SSE payload", payload, e);
-        continue;
-      }
+      for (const payload of parseSseEvent(chunk)) {
+        if (!payload.trim()) continue;
+        let ev;
+        try {
+          ev = JSON.parse(payload);
+        } catch (e) {
+          console.warn("failed to parse SSE payload", payload, e);
+          continue;
+        }
 
-      if (ev.type === "tool_start") {
-        const bubble = addToolBubble(assistantExtras, ev.name, ev.arguments);
-        pendingTools.push(bubble);
-      } else if (ev.type === "tool_end") {
-        const b = pendingTools.shift();
-        if (b) {
-          b.sum.textContent = b.sum.textContent.replace(
-            t("status.running", "Running…"),
-            t("status.done")
-          );
-          b.result.textContent = (ev.result || "").slice(0, 2000);
-          chatEl.scrollTop = chatEl.scrollHeight;
+        if (ev.type === "tool_start") {
+          const bubble = addToolBubble(assistantExtras, ev.name, ev.arguments);
+          pendingTools.push(bubble);
+        } else if (ev.type === "tool_end") {
+          const b = pendingTools.shift();
+          if (b) {
+            b.sum.textContent = b.sum.textContent.replace(
+              t("status.running", "Running…"),
+              t("status.done")
+            );
+            b.result.textContent = (ev.result || "").slice(0, 2000);
+            if (stickToBottom) {
+              chatEl.scrollTop = chatEl.scrollHeight;
+            }
+          }
+          // Show a placeholder while waiting for the next ollama response so
+          // the UI does not look frozen between tool execution and deltas.
+          if (!placeholderCleared) {
+            assistantBody.innerHTML = "";
+            placeholderCleared = true;
+          }
+          if (assistantBody.querySelector(".waiting-msg") === null) {
+            const waiting = document.createElement("span");
+            waiting.className = "waiting-msg";
+            waiting.style.color = "var(--muted)";
+            waiting.style.fontStyle = "italic";
+            waiting.textContent = t("chat.generating");
+            assistantBody.appendChild(waiting);
+          }
+        } else if (ev.type === "status") {
+          if (!placeholderCleared) {
+            assistantBody.innerHTML = "";
+            placeholderCleared = true;
+          }
+          if (assistantBody.querySelector(".waiting-msg") === null) {
+            const waiting = document.createElement("span");
+            waiting.className = "waiting-msg";
+            waiting.style.color = "var(--muted)";
+            waiting.style.fontStyle = "italic";
+            waiting.textContent = ev.message || t("chat.processing");
+            assistantBody.appendChild(waiting);
+          }
+        } else if (ev.type === "thinking") {
+          if (!thinkingBody) thinkingBody = addThinkingBubble(assistantExtras);
+          thinkingBody.textContent += ev.content;
+          scheduleStreamUpdate();
+        } else if (ev.type === "delta") {
+          appendDelta(ev.content);
+        } else if (ev.type === "error") {
+          gotError = true;
+          if (!placeholderCleared) {
+            assistantBody.innerHTML = "";
+            placeholderCleared = true;
+          }
+          const span = document.createElement("span");
+          span.style.color = "#f85149";
+          span.textContent = t("chat.error_prefix", "Error: {message}").replace("{message}", ev.message);
+          assistantBody.appendChild(span);
+        } else if (ev.type === "done") {
+          if (ev.prompt_eval_count != null && ev.eval_count != null) {
+            tokenCount = {
+              prompt_eval_count: ev.prompt_eval_count,
+              eval_count: ev.eval_count,
+              total_count: ev.prompt_eval_count + ev.eval_count,
+            };
+          }
+          if (ev.num_ctx != null) {
+            numCtx = ev.num_ctx;
+          }
+          break;
         }
-        // Show a placeholder while waiting for the next ollama response so
-        // the UI does not look frozen between tool execution and deltas.
-        if (!placeholderCleared) {
-          assistantBody.innerHTML = "";
-          placeholderCleared = true;
-        }
-        if (assistantBody.querySelector(".waiting-msg") === null) {
-          const waiting = document.createElement("span");
-          waiting.className = "waiting-msg";
-          waiting.style.color = "var(--muted)";
-          waiting.style.fontStyle = "italic";
-          waiting.textContent = t("chat.generating");
-          assistantBody.appendChild(waiting);
-        }
-      } else if (ev.type === "status") {
-        if (!placeholderCleared) {
-          assistantBody.innerHTML = "";
-          placeholderCleared = true;
-        }
-        if (assistantBody.querySelector(".waiting-msg") === null) {
-          const waiting = document.createElement("span");
-          waiting.className = "waiting-msg";
-          waiting.style.color = "var(--muted)";
-          waiting.style.fontStyle = "italic";
-          waiting.textContent = ev.message || t("chat.processing");
-          assistantBody.appendChild(waiting);
-        }
-      } else if (ev.type === "thinking") {
-        if (!thinkingBody) thinkingBody = addThinkingBubble(assistantExtras);
-        thinkingBody.textContent += ev.content;
-        scheduleStreamUpdate();
-      } else if (ev.type === "delta") {
-        appendDelta(ev.content);
-      } else if (ev.type === "error") {
-        gotError = true;
-        if (!placeholderCleared) {
-          assistantBody.innerHTML = "";
-          placeholderCleared = true;
-        }
-        const span = document.createElement("span");
-        span.style.color = "#f85149";
-        span.textContent = t("chat.error_prefix", "Error: {message}").replace("{message}", ev.message);
-        assistantBody.appendChild(span);
-      } else if (ev.type === "done") {
-        break;
       }
     }
+  } catch (err) {
+    if (err.name === "AbortError") {
+      assistantBody.textContent = t("chat.stopped");
+    } else {
+      assistantBody.textContent = t("chat.error_prefix", "Error: {message}").replace("{message}", err.message);
+    }
+    assistantDiv.dataset.rawText = assistantBody.textContent;
   }
 
   // Flush any trailing SSE data that did not end with a double newline.
@@ -678,6 +765,17 @@ async function send() {
       if (ev.type === "delta") {
         assistantText += ev.content;
         hadTrailingDelta = true;
+      } else if (ev.type === "done") {
+        if (ev.prompt_eval_count != null && ev.eval_count != null) {
+          tokenCount = {
+            prompt_eval_count: ev.prompt_eval_count,
+            eval_count: ev.eval_count,
+            total_count: ev.prompt_eval_count + ev.eval_count,
+          };
+        }
+        if (ev.num_ctx != null) {
+          numCtx = ev.num_ctx;
+        }
       }
     }
   }
@@ -696,6 +794,14 @@ async function send() {
     assistantBody.textContent = t("chat.no_response");
   }
 
+  assistantDiv.dataset.rawText = assistantText || assistantBody.textContent || "";
+  if (assistantCopyBtn) {
+    assistantCopyBtn.hidden = false;
+  }
+  if (userCopyBtn) {
+    userCopyBtn.hidden = false;
+  }
+
   abortController = null;
   cancelBtn.disabled = true;
   sendBtn.disabled = false;
@@ -706,6 +812,10 @@ async function send() {
   const errorHtml = gotError ? assistantBody.innerHTML : null;
 
   await selectSession(currentSessionId);
+
+  if (tokenCount) {
+    updateTokenGauge(tokenCount.prompt_eval_count, numCtx);
+  }
 
   if (errorHtml && chatEl.lastElementChild) {
     const lastBody = chatEl.lastElementChild.querySelector(".body");
@@ -732,6 +842,7 @@ async function clearMessages() {
     chatEl.innerHTML = "";
     pendingFiles = [];
     renderAttachments();
+    updateTokenGauge(0, 0);
     return;
   }
 
@@ -750,6 +861,7 @@ async function clearMessages() {
     pendingFiles = [];
     chatEl.innerHTML = "";
     renderAttachments();
+    updateTokenGauge(0, 0);
   } catch (err) {
     console.error("failed to clear messages", err);
     alert(t("chat.clear_messages_failed"));
@@ -763,6 +875,45 @@ cancelBtn.addEventListener("click", () => {
     abortController.abort();
   }
 });
+
+function updateTokenGauge(promptEvalCount, numCtx) {
+  const gaugeEl = document.getElementById("token-gauge");
+  const textEl = gaugeEl ? gaugeEl.querySelector(".gauge-text") : null;
+  const fgEl = gaugeEl ? gaugeEl.querySelector(".gauge-fg") : null;
+  if (!gaugeEl || !textEl || !fgEl) return;
+
+  if (!numCtx) {
+    gaugeEl.style.display = "none";
+    return;
+  }
+  gaugeEl.style.display = "";
+
+  const ratio = Math.min(Math.max(promptEvalCount / numCtx, 0), 1);
+  const dash = ratio * 100;
+  const gap = 100 - dash;
+  fgEl.style.strokeDasharray = `${dash} ${gap}`;
+  fgEl.style.strokeDashoffset = "0";
+
+  textEl.textContent = (promptEvalCount / 1000).toFixed(1) + "k";
+
+  if (ratio >= 0.8) {
+    fgEl.style.stroke = "var(--danger)";
+  } else if (ratio >= 0.5) {
+    fgEl.style.stroke = "#f0883e";
+  } else {
+    fgEl.style.stroke = "var(--accent)";
+  }
+}
+
+function updateTokenGaugeFromSession() {
+  if (!currentSession) return;
+  const tc = currentSession.token_count;
+  if (!tc || !tc.num_ctx) {
+    updateTokenGauge(0, 0);
+    return;
+  }
+  updateTokenGauge(tc.prompt_eval_count || 0, tc.num_ctx || 0);
+}
 
 loadSessions();
 loadModelCapabilities();

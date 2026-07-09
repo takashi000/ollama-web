@@ -42,7 +42,6 @@ def _safe_tool_result(result: str) -> str:
 
 
 
-
 def get_client(host: str | None = None) -> ollama.Client:
     """Return an ``ollama.Client`` configured for the configured host."""
     import httpx
@@ -177,6 +176,21 @@ def _assistant_message(response: Any) -> Message:
     return Message(role="assistant", content="")
 
 
+def _token_counts(response: Any) -> dict[str, int] | None:
+    """Extract prompt_eval_count and eval_count from an ollama response."""
+    if response is None:
+        return None
+    if isinstance(response, dict):
+        prompt_eval = response.get("prompt_eval_count")
+        eval_count = response.get("eval_count")
+    else:
+        prompt_eval = getattr(response, "prompt_eval_count", None)
+        eval_count = getattr(response, "eval_count", None)
+    if prompt_eval is None or eval_count is None:
+        return None
+    return {"prompt_eval_count": int(prompt_eval), "eval_count": int(eval_count)}
+
+
 def chat_with_tools(
     messages: list[Message],
     model: str,
@@ -196,7 +210,7 @@ def chat_with_tools(
     - ``{"type": "tool_end", "name": str, "result": str}``
     - ``{"type": "delta", "content": str}``
     - ``{"type": "thinking", "content": str}``
-    - ``{"type": "done"}``
+    - ``{"type": "done", "prompt_eval_count": int, "eval_count": int}``
     - ``{"type": "error", "message": str}``
 
     The final assistant message is streamed token-by-token via ``delta`` events.
@@ -244,6 +258,7 @@ def chat_with_tools(
             return
 
         calls = _tool_calls(resp)
+        tokens = _token_counts(resp)
         if not calls:
             # No tool calls: stream the final answer for UI effect.
             content = _assistant_content(resp)
@@ -252,7 +267,10 @@ def chat_with_tools(
                 yield {"type": "thinking", "content": thinking}
             if content:
                 yield {"type": "delta", "content": content}
-            yield {"type": "done"}
+            done_event: dict[str, Any] = {"type": "done"}
+            if tokens:
+                done_event.update(tokens)
+            yield done_event
             return
 
         # Append the assistant message that requested tool calls.
@@ -315,13 +333,17 @@ def chat_with_tools(
         logger.warning("final ollama chat call failed: %s", exc)
         yield {"type": "error", "message": str(exc)}
         return
+    tokens = _token_counts(resp)
     content = _assistant_content(resp)
     thinking = _assistant_thinking(resp)
     if thinking:
         yield {"type": "thinking", "content": thinking}
     if content:
         yield {"type": "delta", "content": content}
-    yield {"type": "done"}
+    done_event = {"type": "done"}
+    if tokens:
+        done_event.update(tokens)
+    yield done_event
 
 
 def _trim_tool_result(result: str, limit: int) -> str:
@@ -400,8 +422,10 @@ def stream_chat_with_tools(
             return
 
         chunk_count = 0
+        last_chunk = None
         for chunk in stream:
             chunk_count += 1
+            last_chunk = chunk
             thinking = _assistant_thinking(chunk)
             if thinking:
                 full_message.setdefault("thinking", "")
@@ -434,7 +458,11 @@ def stream_chat_with_tools(
             messages.append(msg)
 
         if not tool_calls:
-            yield {"type": "done"}
+            done_event = {"type": "done"}
+            tokens = _token_counts(last_chunk)
+            if tokens:
+                done_event.update(tokens)
+            yield done_event
             return
 
         logger.info("executing %d tool call(s) round=%d", len(tool_calls), rounds)
@@ -517,7 +545,9 @@ def stream_chat_with_tools(
         return
 
     logger.info("streaming final answer")
+    last_chunk = None
     for chunk in stream:
+        last_chunk = chunk
         thinking = _assistant_thinking(chunk)
         if thinking:
             yield {"type": "thinking", "content": thinking}
@@ -525,7 +555,11 @@ def stream_chat_with_tools(
         if content:
             yield {"type": "delta", "content": content}
     logger.info("final answer stream finished elapsed=%.2fs", time.time() - t0)
-    yield {"type": "done"}
+    done_event = {"type": "done"}
+    tokens = _token_counts(last_chunk)
+    if tokens:
+        done_event.update(tokens)
+    yield done_event
 
 
 async def astream_chat_with_tools(

@@ -141,6 +141,23 @@ def _collect_images(store: SessionStore, session_id: str, file_ids: list[str]) -
     return images
 
 
+def _token_count_from_done(
+    done_event: dict[str, Any] | None, num_ctx: int
+) -> dict[str, int] | None:
+    if not done_event:
+        return None
+    prompt_eval_count = done_event.get("prompt_eval_count")
+    eval_count = done_event.get("eval_count")
+    if prompt_eval_count is None or eval_count is None:
+        return None
+    return {
+        "prompt_eval_count": int(prompt_eval_count),
+        "eval_count": int(eval_count),
+        "num_ctx": num_ctx,
+        "total_count": int(prompt_eval_count) + int(eval_count),
+    }
+
+
 async def _event_stream(
     request: Request,
     payload: dict[str, Any],
@@ -169,6 +186,11 @@ async def _chat_event_stream(
     ollama_options = dict(ollama_settings["options"])
     custom_prompt = str(ollama_settings["system_prompt"])
     system_prompt = _compose_system_prompt(language, custom_prompt)
+    num_ctx_value = ollama_options.get("num_ctx")
+    try:
+        num_ctx = int(num_ctx_value) if num_ctx_value is not None else 0
+    except (TypeError, ValueError):
+        num_ctx = 0
 
     store: SessionStore = request.app.state.session_store
     file_ids: list[str] = [
@@ -176,6 +198,7 @@ async def _chat_event_stream(
     ]
     user_content = ""
     assistant_text = ""
+    last_done_event: dict[str, Any] | None = None
 
     try:
         session_messages: list[Message] = []
@@ -261,6 +284,9 @@ async def _chat_event_stream(
                     assistant_text + event.get("content", ""),
                     request.app.state.settings.max_message_chars,
                 )
+            if event.get("type") == "done":
+                event["num_ctx"] = num_ctx
+                last_done_event = event
             yield event
 
     except Exception as exc:  # noqa: BLE001
@@ -285,10 +311,12 @@ async def _chat_event_stream(
                 attachments=file_ids,
             )
             if assistant_text:
+                token_count = _token_count_from_done(last_done_event, num_ctx)
                 store.add_message(
                     session_id=session_id,
                     role="assistant",
                     content=assistant_text,
+                    token_count=token_count,
                 )
 
         # Persist fetched files from tools like search_and_fetch.
