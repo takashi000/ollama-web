@@ -354,7 +354,6 @@ async function selectSession(id) {
     stickToBottom = true;
     renderSession();
     renderSessionList((await (await fetch("/api/sessions")).json()).sessions || []);
-    updateTokenGaugeFromSession();
   } catch (err) {
     console.error("failed to select session", err);
   }
@@ -398,7 +397,10 @@ function _renderAssistantContent(body, content) {
 
 function renderSession() {
   chatEl.innerHTML = "";
-  if (!currentSession) return;
+  if (!currentSession) {
+    updateTokenGauge(0, 0);
+    return;
+  }
   const msgs = currentSession.messages || [];
   for (const m of msgs) {
     if (m.role === "user") {
@@ -438,6 +440,7 @@ function renderSession() {
       }
     }
   }
+  updateTokenGaugeFromSession();
 }
 
 function renderAttachments() {
@@ -906,13 +909,42 @@ function updateTokenGauge(promptEvalCount, numCtx) {
 }
 
 function updateTokenGaugeFromSession() {
-  if (!currentSession) return;
-  const tc = currentSession.token_count;
-  if (!tc || !tc.num_ctx) {
+  if (!currentSession) {
     updateTokenGauge(0, 0);
     return;
   }
-  updateTokenGauge(tc.prompt_eval_count || 0, tc.num_ctx || 0);
+  const tc = currentSession.token_count;
+  const messages = currentSession.messages || [];
+  const assistantMessages = messages.filter((m) => m.role === "assistant");
+
+  if (tc && tc.num_ctx) {
+    updateTokenGauge(tc.prompt_eval_count || 0, tc.num_ctx || 0);
+    return;
+  }
+
+  // Fall back to the most recent assistant message token_count when the
+  // session aggregate is missing (e.g. older sessions).
+  let fallback = null;
+  for (let i = assistantMessages.length - 1; i >= 0; i--) {
+    const mtc = assistantMessages[i].token_count;
+    if (mtc && mtc.num_ctx) {
+      fallback = mtc;
+      break;
+    }
+  }
+  if (fallback) {
+    updateTokenGauge(fallback.prompt_eval_count || 0, fallback.num_ctx || 0);
+    return;
+  }
+
+  // Hide gauge only when the session has no chat history at all.
+  if (messages.length === 0) {
+    updateTokenGauge(0, 0);
+    return;
+  }
+
+  // Keep the current gauge value for sessions that have messages but no
+  // token data yet, so the gauge does not flicker during session switching.
 }
 
 loadSessions();
