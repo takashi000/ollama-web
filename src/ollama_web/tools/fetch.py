@@ -39,6 +39,20 @@ _FILETYPE_SUFFIXES: dict[str, str] = {
 _TOOL_NAME = "search_and_fetch"
 
 
+def _slim_matched(matched: list[dict[str, str]]) -> list[dict[str, str]]:
+    """Return a token-embeddable view of ``matched`` without the ``body`` field.
+
+    ``search_and_fetch`` embeds the candidate list in its continuation token
+    so subsequent pages can resume without re-running the web search. The
+    rendering layer only uses ``title`` and ``href``; the search-engine
+    snippet (``body``) is unused and can be large (multi-KB for PDF
+    abstracts). Including it inflates the token to the point where the
+    model or tool-result trimming may truncate it, corrupting the base64
+    payload. Stripping ``body`` keeps the token to a few hundred bytes.
+    """
+    return [{"title": m.get("title", ""), "href": m.get("href", "")} for m in matched]
+
+
 def set_session_context(session_id: str | None) -> None:
     """Set the active session id so fetched files can be persisted later."""
     # No-op marker kept for future hooks; storage is keyed by session_id directly.
@@ -295,7 +309,7 @@ def _render_file_page(
             _TOOL_NAME,
             url,
             0,
-            matched=matched,
+            matched=_slim_matched(matched),
             file_idx=file_idx + 1,
             file_offset=0,
         )
@@ -328,7 +342,7 @@ def _render_file_page(
             _TOOL_NAME,
             url,
             file_offset + per_file_chars,
-            matched=matched,
+            matched=_slim_matched(matched),
             file_idx=file_idx,
             file_offset=file_offset + per_file_chars,
         )
@@ -340,7 +354,7 @@ def _render_file_page(
             _TOOL_NAME,
             url,
             0,
-            matched=matched,
+            matched=_slim_matched(matched),
             file_idx=file_idx + 1,
             file_offset=0,
         )

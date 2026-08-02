@@ -190,7 +190,7 @@ URL: {url}
    - ファイルが完了したら次のファイルへ
 4. 残り候補 or 残りファイル内容があれば `has_more: true` + `next_token` を付与
 
-> トークンペイロードは `search_and_fetch` 用に拡張され、`matched`（候補URLリスト）を埋め込むことで再検索なしで続きを取得（API呼び出し増加を防止）。
+> トークンペイロードは `search_and_fetch` 用に拡張され、`matched`（候補リスト）を埋め込むことで再検索なしで続きを取得（API呼び出し増加を防止）。`matched` には [`_slim_matched()`](src/ollama_web/tools/fetch.py:42) で `body`（検索スニペット）を除外した `title` / `href` のみを格納し、トークンサイズの肥大化と末尾欠損による破損を防止する。
 
 ### 設計上の注意点
 
@@ -223,7 +223,7 @@ URL: {url}
 ### helper/pagination.py
 
 - **実装**: [`pagination.py`](src/ollama_web/tools/helper/pagination.py:1)
-- [`make_token()`](src/ollama_web/tools/helper/pagination.py:1): 継続トークン生成（`base64url(JSON)`）
+- [`make_token()`](src/ollama_web/tools/helper/pagination.py:1): 継続トークン生成（`base64url(JSON)`、`ensure_ascii=True` で純ASCII化し末尾欠損時の `UnicodeDecodeError` を防止）
 - [`parse_token()`](src/ollama_web/tools/helper/pagination.py:1): トークン検証・デコード。`tool` 一致・`v` バージョン・必須フィールドを検証し、不正時は `InvalidTokenError`
 - [`format_paged_result()`](src/ollama_web/tools/helper/pagination.py:1): 戻り値ラッピング。`---page-info---` マーカーで本文とフッターを分離
 - [`parse_paged_result()`](src/ollama_web/tools/helper/pagination.py:1): 戻り値分割（テスト・チェーニング用）
@@ -303,7 +303,7 @@ flowchart TD
 }
 ```
 
-`search_and_fetch` は追加フィールドを埋め込む:
+`search_and_fetch` は追加フィールドを埋め込む。`matched` には検索スニペット（`body`）を含めず `title` / `href` のみを格納する（[`_slim_matched()`](src/ollama_web/tools/fetch.py:42) で生成）。これによりトークンサイズを数百バイトに抑え、LLM が `continue_from` にコピーする際の末尾欠損による破損を防止する:
 
 ```json
 {
@@ -311,7 +311,7 @@ flowchart TD
   "tool": "search_and_fetch",
   "url": "https://example.com/file.pdf",
   "offset": 8000,
-  "matched": [{"title": "...", "href": "...", "body": "..."}],
+  "matched": [{"title": "...", "href": "..."}],
   "file_idx": 1,
   "file_offset": 8000
 }

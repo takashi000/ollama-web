@@ -177,3 +177,4 @@ data/
 *.err
 .agents/
 .mcp_test_fs/
+plans/

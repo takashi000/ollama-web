@@ -354,6 +354,123 @@ def test_search_and_fetch_pagination_across_files(monkeypatch):
     assert seen_titles == ["File1", "File2"]
 
 
+def test_make_token_ensure_ascii_true():
+    """Tokens are pure ASCII even with non-ASCII content (ensure_ascii=True)."""
+    token = make_token("scrape_url", "https://example.com/日本語", 0, title="論文–要約")
+    # base64url alphabet is pure ASCII; any non-ASCII byte would break this.
+    assert all(ord(c) < 128 for c in token)
+    payload = parse_token(token, "scrape_url")
+    assert payload["url"] == "https://example.com/日本語"
+    assert payload["title"] == "論文–要約"
+
+
+def test_search_and_fetch_token_excludes_body(monkeypatch):
+    """The continuation token must not embed the search snippet (body)."""
+    from ollama_web.tools import fetch as fetch_mod
+
+    matched = [
+        {
+            "title": "File1",
+            "href": "https://example.com/f1.txt",
+            "body": "X" * 5000,  # large snippet that would bloat the token
+        }
+    ]
+    monkeypatch.setattr(fetch_mod, "web_search", lambda q, max_results=None: matched)
+    monkeypatch.setattr(
+        fetch_mod,
+        "fetch_public_bytes",
+        lambda url, timeout=None: (b"A" * 200, "", "text/plain"),
+    )
+    result = fetch_mod.search_and_fetch("query", "txt", max_chars=50)
+    _, _, next_token = parse_paged_result(result)
+    assert next_token is not None
+    payload = parse_token(next_token, "search_and_fetch")
+    embedded = payload.get("matched", [])
+    assert embedded, "matched list should be embedded for resume"
+    for entry in embedded:
+        assert "body" not in entry, "body must be stripped from the token"
+        assert "title" in entry and "href" in entry
+
+
+def test_search_and_fetch_token_size_reduced(monkeypatch):
+    """A large body snippet must not inflate the token."""
+    from ollama_web.tools import fetch as fetch_mod
+
+    matched = [
+        {
+            "title": "File1",
+            "href": "https://example.com/f1.txt",
+            "body": "B" * 10_000,
+        }
+    ]
+    monkeypatch.setattr(fetch_mod, "web_search", lambda q, max_results=None: matched)
+    monkeypatch.setattr(
+        fetch_mod,
+        "fetch_public_bytes",
+        lambda url, timeout=None: (b"A" * 200, "", "text/plain"),
+    )
+    result = fetch_mod.search_and_fetch("query", "txt", max_chars=50)
+    _, _, next_token = parse_paged_result(result)
+    assert next_token is not None
+    # Token should be far smaller than the 10KB body it would otherwise carry.
+    assert len(next_token) < 1000
+
+
+def test_search_and_fetch_continue_with_slim_token(monkeypatch):
+    """Resuming with a slim (body-less) token walks files correctly."""
+    from ollama_web.tools import fetch as fetch_mod
+
+    matched = [
+        {"title": "File1", "href": "https://example.com/f1.txt", "body": "ignored1"},
+        {"title": "File2", "href": "https://example.com/f2.txt", "body": "ignored2"},
+    ]
+    monkeypatch.setattr(fetch_mod, "web_search", lambda q, max_results=None: matched)
+    contents = {
+        "https://example.com/f1.txt": b"FILE1 " + b"A" * 200,
+        "https://example.com/f2.txt": b"FILE2 " + b"B" * 200,
+    }
+    monkeypatch.setattr(
+        fetch_mod,
+        "fetch_public_bytes",
+        lambda url, timeout=None: (contents[url], "", "text/plain"),
+    )
+
+    seen = []
+    token = None
+    for _ in range(20):
+        result = fetch_mod.search_and_fetch("query", "txt", max_chars=50, continue_from=token)
+        body_text, has_more, token = parse_paged_result(result)
+        if "File1" in body_text and "File1" not in seen:
+            seen.append("File1")
+        if "File2" in body_text and "File2" not in seen:
+            seen.append("File2")
+        if not has_more:
+            break
+    assert seen == ["File1", "File2"]
+
+
+def test_search_and_fetch_pagination_with_nonascii_title(monkeypatch):
+    """Non-ASCII titles/URLs survive a full pagination round-trip."""
+    from ollama_web.tools import fetch as fetch_mod
+
+    matched = [
+        {"title": "日本語–タイトル", "href": "https://example.com/論文.txt", "body": ""},
+    ]
+    monkeypatch.setattr(fetch_mod, "web_search", lambda q, max_results=None: matched)
+    monkeypatch.setattr(
+        fetch_mod,
+        "fetch_public_bytes",
+        lambda url, timeout=None: (b"A" * 200, "", "text/plain"),
+    )
+    result = fetch_mod.search_and_fetch("query", "txt", max_chars=50)
+    body_text, has_more, next_token = parse_paged_result(result)
+    assert "日本語–タイトル" in body_text
+    assert has_more is True
+    # Resuming must not raise even though the token carries non-ASCII fields.
+    result2 = fetch_mod.search_and_fetch("query", "txt", max_chars=50, continue_from=next_token)
+    assert isinstance(result2, str)
+
+
 # ---------------------------------------------------------------------------
 # pagination helper tests
 # ---------------------------------------------------------------------------

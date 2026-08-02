@@ -64,7 +64,10 @@ def make_token(tool: str, url: str, offset: int, **extra: Any) -> str:
         "offset": int(offset),
     }
     payload.update(extra)
-    raw = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    # ensure_ascii=True keeps the token pure ASCII so truncation of the
+    # token by the model or tool-result trimming cannot split a multibyte
+    # UTF-8 sequence (which would raise UnicodeDecodeError on decode).
+    raw = json.dumps(payload, ensure_ascii=True, separators=(",", ":")).encode("ascii")
     return _b64url_encode(raw)
 
 
