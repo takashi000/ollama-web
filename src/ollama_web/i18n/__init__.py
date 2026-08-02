@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from ollama_web.config import settings
 
@@ -22,7 +22,7 @@ def _load_messages(lang: str) -> dict[str, Any]:
     path = _MESSAGES_DIR / f"{lang}.json"
     try:
         with path.open("r", encoding="utf-8") as f:
-            return json.load(f)
+            return cast(dict[str, Any], json.load(f))
     except (FileNotFoundError, json.JSONDecodeError):
         return {}
 

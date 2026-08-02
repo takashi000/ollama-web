@@ -30,6 +30,10 @@ MAX_TOOL_CONTEXT_CHARS = 24000
 # Type alias matching ollama's expected tools signature.
 ToolCallable = Callable[..., Any]
 
+# Marker that separates a paged tool result's body from its page-info footer.
+# Must match ``ollama_web.tools.helper.pagination.PAGE_INFO_MARKER``.
+_PAGE_INFO_MARKER = "\n---page-info---"
+
 
 def _safe_tool_arguments(arguments: Any) -> Any:
     return redact_secrets(arguments)
@@ -38,8 +42,6 @@ def _safe_tool_arguments(arguments: Any) -> Any:
 def _safe_tool_result(result: str) -> str:
     redacted = redact_secrets(result)
     return str(redacted)
-
-
 
 
 def get_client(host: str | None = None) -> ollama.Client:
@@ -340,17 +342,40 @@ def chat_with_tools(
         yield {"type": "thinking", "content": thinking}
     if content:
         yield {"type": "delta", "content": content}
-    done_event = {"type": "done"}
+    done_event_final: dict[str, Any] = {"type": "done"}
     if tokens:
-        done_event.update(tokens)
-    yield done_event
+        done_event_final.update(tokens)
+    yield done_event_final
 
 
 def _trim_tool_result(result: str, limit: int) -> str:
-    """Truncate ``result`` to ``limit`` chars while keeping it readable."""
+    """Truncate ``result`` to ``limit`` chars while keeping it readable.
+
+    When the result contains a ``---page-info---`` footer (emitted by paged
+    tools), the footer is preserved and only the body is truncated so the
+    model can still see the ``next_token`` needed to fetch the continuation.
+    """
     if len(result) <= limit:
         return result
-    # Prefer cutting at a paragraph boundary.
+
+    # Protect the page-info footer from truncation. ``split`` keeps the
+    # marker on the footer side so the ``---page-info---`` line is preserved.
+    if _PAGE_INFO_MARKER in result:
+        body, footer = result.split(_PAGE_INFO_MARKER, 1)
+        footer = _PAGE_INFO_MARKER + footer
+        body_limit = limit - len(footer)
+        if body_limit <= 0:
+            # The footer alone exceeds the limit; keep it verbatim and drop the
+            # body entirely so the model can still continue paging.
+            return "…[tool result truncated]" + footer
+        if len(body) <= body_limit:
+            return result
+        cutoff = body[:body_limit].rsplit("\n\n", 1)[0]
+        if len(cutoff) < body_limit * 0.5:
+            cutoff = body[:body_limit].rsplit(" ", 1)[0]
+        return cutoff + "\n\n…[tool result truncated]" + footer
+
+    # No footer: legacy truncation behaviour.
     cutoff = result[:limit].rsplit("\n\n", 1)[0]
     if len(cutoff) < limit * 0.5:
         # No good paragraph boundary; cut at a space instead.
@@ -457,9 +482,7 @@ def stream_chat_with_tools(
         # stream with almost no meaningful content. Log it and retry a few
         # times before giving up.
         is_empty = (
-            not full_message.get("content")
-            and not full_message.get("thinking")
-            and not tool_calls
+            not full_message.get("content") and not full_message.get("thinking") and not tool_calls
         )
         if is_empty and empty_retries < MAX_EMPTY_RETRIES:
             empty_retries += 1
@@ -497,7 +520,7 @@ def stream_chat_with_tools(
                     "type": "warning",
                     "message": t("status.empty_response", lang=language),
                 }
-            done_event = {"type": "done"}
+            done_event: dict[str, Any] = {"type": "done"}
             tokens = _token_counts(last_chunk)
             if tokens:
                 done_event.update(tokens)
@@ -594,11 +617,11 @@ def stream_chat_with_tools(
         if content:
             yield {"type": "delta", "content": content}
     logger.info("final answer stream finished elapsed=%.2fs", time.time() - t0)
-    done_event = {"type": "done"}
+    done_event_final: dict[str, Any] = {"type": "done"}
     tokens = _token_counts(last_chunk)
     if tokens:
-        done_event.update(tokens)
-    yield done_event
+        done_event_final.update(tokens)
+    yield done_event_final
 
 
 async def astream_chat_with_tools(
@@ -690,9 +713,7 @@ def _assistant_message_chunk(full_message: dict[str, Any]) -> Message | None:
             name = c.get("name", "")
             args = c.get("arguments", {})
             tc_list.append(
-                Message.ToolCall(
-                    function=Message.ToolCall.Function(name=name, arguments=args)
-                )
+                Message.ToolCall(function=Message.ToolCall.Function(name=name, arguments=args))
             )
         kwargs["tool_calls"] = tc_list
     return Message(**kwargs)

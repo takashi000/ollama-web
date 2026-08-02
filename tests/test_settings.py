@@ -123,8 +123,7 @@ def test_settings_api_and_page_elements(tmp_path: Path) -> None:
             assert 'data-settings-screen="ui"' in html
             assert 'data-settings-screen="ollama"' in html
             num_keep = (
-                'data-option="num_keep" data-type="int" type="number" '
-                'step="1" placeholder="24"'
+                'data-option="num_keep" data-type="int" type="number" step="1" placeholder="24"'
             )
             assert num_keep in html
             assert "&lt;|eot_id|&gt;" in html
@@ -159,9 +158,7 @@ def test_options_are_forwarded_to_tool_and_final_rounds(monkeypatch: pytest.Monk
                     "message": {
                         "role": "assistant",
                         "content": "",
-                        "tool_calls": [
-                            {"function": {"name": "missing_tool", "arguments": {}}}
-                        ],
+                        "tool_calls": [{"function": {"name": "missing_tool", "arguments": {}}}],
                     }
                 }
             return {"message": {"role": "assistant", "content": "done"}}

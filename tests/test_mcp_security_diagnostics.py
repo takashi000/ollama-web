@@ -330,15 +330,13 @@ def test_diagnostic_llm_auto_executes_dangerous_mcp_tool_without_confirmation(
             )
         )
 
-
         assert marker.exists()
         assert any(
             event.get("type") == "tool_start" and event["name"] == dangerous_name
             for event in events
         )
         assert any(
-            event.get("type") == "tool_end" and event["name"] == dangerous_name
-            for event in events
+            event.get("type") == "tool_end" and event["name"] == dangerous_name for event in events
         )
         assert any(
             json.loads(marker.read_text(encoding="utf-8"))["name"] == dangerous_name

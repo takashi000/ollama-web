@@ -113,8 +113,8 @@ def _attachment_context(store: SessionStore, session_id: str, file_ids: list[str
             continue
         text = _limit_text(chat_file.text or "", settings.max_attachment_text_chars)
         parts.append(
-            f"<attached-file name=\"{html.escape(chat_file.name)}\" id=\"{chat_file.id}\" "
-            f"source=\"{chat_file.source}\">\n{text}\n</attached-file>"
+            f'<attached-file name="{html.escape(chat_file.name)}" id="{chat_file.id}" '
+            f'source="{chat_file.source}">\n{text}\n</attached-file>'
         )
     if not parts:
         return ""
@@ -276,8 +276,14 @@ async def _chat_event_stream(
             logger.info("enabled tools capability fallback for cloud model %s", model)
 
         async for event in llm.astream_chat_with_tools(
-            messages, model, think=think, host=host, registry=registry,
-            capabilities=capabilities, options=ollama_options, language=language,
+            messages,
+            model,
+            think=think,
+            host=host,
+            registry=registry,
+            capabilities=capabilities,
+            options=ollama_options,
+            language=language,
         ):
             if event.get("type") == "delta":
                 assistant_text = _limit_text(
@@ -296,8 +302,7 @@ async def _chat_event_stream(
         # Persist the error as the assistant message so it survives reloads
         # and re-renders in the chat pane.
         assistant_text = (
-            f"[ERROR] {error_msg}\n\n"
-            f"{t('errors.vision_model_required', lang=language)}"
+            f"[ERROR] {error_msg}\n\n{t('errors.vision_model_required', lang=language)}"
         )
 
     finally:

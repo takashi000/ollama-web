@@ -90,9 +90,7 @@ async def put_servers(request: Request) -> JSONResponse:
                     continue
                 cleaned["mcpServers"][name] = cleaned_server
         else:
-            errors.append(
-                f"Server '{name}' must define either 'command' (stdio) or 'url' (http)"
-            )
+            errors.append(f"Server '{name}' must define either 'command' (stdio) or 'url' (http)")
 
     if errors:
         return JSONResponse({"error": errors}, status_code=400)

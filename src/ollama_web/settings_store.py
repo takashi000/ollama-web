@@ -61,9 +61,7 @@ def settings_file(data_dir: str | Path) -> Path:
 def _require_keys(value: dict[str, Any], allowed: set[str], where: str) -> None:
     unknown = set(value) - allowed
     if unknown:
-        raise SettingsValidationError(
-            f"Unknown {where} field(s): {', '.join(sorted(unknown))}"
-        )
+        raise SettingsValidationError(f"Unknown {where} field(s): {', '.join(sorted(unknown))}")
 
 
 def _validate_options(raw: Any) -> dict[str, Any]:

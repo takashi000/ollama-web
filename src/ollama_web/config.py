@@ -16,15 +16,15 @@ def _csv_env(name: str) -> list[str]:
 class Settings:
     """Runtime settings resolved from environment variables."""
 
-    ollama_host: str = field(default_factory=lambda: os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434"))
+    ollama_host: str = field(
+        default_factory=lambda: os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
+    )
     default_model: str = field(
         default_factory=lambda: os.environ.get("OLLAMA_WEB_MODEL", "llama3.2")
     )
     host: str = field(default_factory=lambda: os.environ.get("OLLAMA_WEB_HOST", "127.0.0.1"))
     port: int = field(default_factory=lambda: int(os.environ.get("OLLAMA_WEB_PORT", "8000")))
-    data_dir: str = field(
-        default_factory=lambda: os.environ.get("OLLAMA_WEB_DATA_DIR", "data")
-    )
+    data_dir: str = field(default_factory=lambda: os.environ.get("OLLAMA_WEB_DATA_DIR", "data"))
     max_upload_mb: int = field(
         default_factory=lambda: int(os.environ.get("OLLAMA_WEB_MAX_UPLOAD_MB", "20"))
     )
@@ -55,10 +55,9 @@ class Settings:
     max_message_chars: int = 20000
     max_attachment_text_chars: int = 20000
     max_image_pixels: int = 16_000_000
-    max_tool_result_chars: int = 3000
-    language: str = field(
-        default_factory=lambda: os.environ.get("OLLAMA_WEB_LANGUAGE", "ja")
-    )
+    max_tool_result_chars: int = 6000
+    pagination_token_ttl: int = 1800
+    language: str = field(default_factory=lambda: os.environ.get("OLLAMA_WEB_LANGUAGE", "ja"))
 
 
 settings = Settings()

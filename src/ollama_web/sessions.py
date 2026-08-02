@@ -92,7 +92,7 @@ class ChatMessage:
     token_count: dict[str, int] | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        out = {
+        out: dict[str, Any] = {
             "role": self.role,
             "content": self.content,
             "attachments": list(self.attachments),

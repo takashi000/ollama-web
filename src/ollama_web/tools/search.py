@@ -22,9 +22,7 @@ def web_search(query: str, max_results: int | None = None) -> list[dict[str, str
         return []
 
     limit = (
-        max_results
-        if max_results is not None and max_results > 0
-        else settings.search_max_results
+        max_results if max_results is not None and max_results > 0 else settings.search_max_results
     )
 
     results: list[dict[str, str]] = []

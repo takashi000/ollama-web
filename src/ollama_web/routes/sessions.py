@@ -127,7 +127,8 @@ async def upload_file(request: Request) -> JSONResponse:
             # Images are passed to ollama via Message.images (base64), not as text.
             text = ""
         elif content_type == "application/pdf" or name.lower().endswith(".pdf"):
-            text = extract_pdf_text(data)
+            # extract_pdf_text now returns (text, has_more, next_page_offset).
+            text = extract_pdf_text(data)[0]
         else:
             # Try decode as text for text-like uploads.
             try:

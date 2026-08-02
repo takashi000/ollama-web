@@ -104,18 +104,14 @@ def validate_mcp_server_name(name: Any) -> str:
     """Return a safe MCP server name or raise ``ValueError``."""
     value = str(name)
     if not _is_safe_name(value):
-        raise ValueError(
-            "server name must match ^[A-Za-z0-9_-]{1,64}$ and must not contain '__'"
-        )
+        raise ValueError("server name must match ^[A-Za-z0-9_-]{1,64}$ and must not contain '__'")
     return value
 
 
 def _validate_mcp_tool_name(name: Any) -> str:
     value = str(name)
     if not _is_safe_name(value):
-        raise ValueError(
-            "tool name must match ^[A-Za-z0-9_-]{1,64}$ and must not contain '__'"
-        )
+        raise ValueError("tool name must match ^[A-Za-z0-9_-]{1,64}$ and must not contain '__'")
     return value
 
 
@@ -247,7 +243,6 @@ def wrap_untrusted_tool_output(text: str) -> str:
     """Wrap MCP output so the model treats it as data, not instructions."""
     body = str(redact_secrets(text))
     return f"{_UNTRUSTED_PREFIX}\n<tool-output>\n{body}\n</tool-output>"
-
 
 
 def _to_ollama_tool(server_name: str, tool: Any) -> dict[str, Any]:
@@ -437,7 +432,9 @@ async def collect_mcp_tools(
     results = await asyncio.gather(*tasks, return_exceptions=True)
     all_tools: list[dict[str, Any]] = []
     for name, result in zip(servers.keys(), results, strict=True):
-        if isinstance(result, Exception):
+        # asyncio.gather(return_exceptions=True) can surface BaseException
+        # (e.g. CancelledError), so check BaseException here.
+        if isinstance(result, BaseException):
             logger.warning("failed to list tools from MCP server %s: %s", name, result)
             continue
         all_tools.extend(result)
