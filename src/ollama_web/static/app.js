@@ -189,14 +189,24 @@ function addMessage(role, rawText, showCopy = false) {
   copyBtn.setAttribute("aria-label", t("common.copy", "Copy"));
   copyBtn.textContent = "📋";
   copyBtn.hidden = !showCopy;
-  copyBtn.addEventListener("click", () => {
+  copyBtn.addEventListener("click", async () => {
     const raw = div.dataset.rawText || "";
-    navigator.clipboard.writeText(raw).then(() => {
-      copyBtn.textContent = "✓";
-      setTimeout(() => {
-        copyBtn.textContent = "📋";
-      }, 1200);
-    });
+    let feedback = "✓";
+
+    try {
+      if (!navigator.clipboard?.writeText) {
+        throw new Error("Clipboard API is unavailable");
+      }
+      await navigator.clipboard.writeText(raw);
+    } catch (err) {
+      console.error("failed to copy message", err);
+      feedback = "⚠";
+    }
+
+    copyBtn.textContent = feedback;
+    setTimeout(() => {
+      copyBtn.textContent = "📋";
+    }, 1200);
   });
   div.appendChild(copyBtn);
   chatEl.appendChild(div);
