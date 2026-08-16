@@ -7,6 +7,8 @@
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-08-16
+
 ### Changed
 
 - 使用されていない非ストリーミングのチャット処理を削除し、ツール呼び出し関連のテストを実運用のストリーミング処理へ統合しました。
@@ -158,7 +160,8 @@
 
 - Web UIのセキュリティヘッダーと表示処理を強化しました。
 
-[Unreleased]: https://github.com/takashi000/ollama-web/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/takashi000/ollama-web/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/takashi000/ollama-web/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/takashi000/ollama-web/compare/v0.4.5...v0.5.0
 [0.4.5]: https://github.com/takashi000/ollama-web/compare/v0.4.4...v0.4.5
 [0.4.4]: https://github.com/takashi000/ollama-web/compare/v0.4.3...v0.4.4
