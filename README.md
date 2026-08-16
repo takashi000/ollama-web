@@ -1,20 +1,21 @@
 # ollama-web
 
-A local web UI for using Ollama from a browser.
+A lightweight personal web UI for Ollama that runs directly on your machine — no Docker or virtual machine required.
 
-A lightweight Starlette-based server providing chat, session storage, file attachments, web search / fetch tools, and PDF text extraction. It listens on localhost only by default and protects the UI and API with PIN login.
+Use Ollama from your browser with streaming chat, web search and URL fetching, image, file, and PDF attachments, and MCP tool calling. It is designed for personal use when you want these capabilities in a small host-OS setup without deploying a large, complex AI platform.
 
 <img src="./docs/capture.gif" width="100%" alt="Screenshot of the chat" />
 
-## Features
+## Highlights
 
 - Streaming chat with Ollama models
-- Local storage of conversation sessions and attachments
-- Image attachment resizing and sending for vision models
-- Web search, URL scraping, file search / fetch, and PDF text extraction tools
-- MCP client support: use tools from stdio / Streamable HTTP MCP servers
-- PIN authentication, CSRF protection, CSP, locally distributed frontend dependency files
-- External URL fetching with SSRF protection
+- Web search and URL fetching
+- Image, file, and PDF attachments
+- MCP tools via stdio and Streamable HTTP
+- Runs directly on the host OS — no Docker or VM required
+- Local conversation and attachment storage
+- PIN authentication, CSRF protection, CSP, and SSRF protection
+- Japanese and English UI
 
 ## Requirements
 

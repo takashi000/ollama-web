@@ -1,20 +1,21 @@
 # ollama-web
 
-Ollama をブラウザから利用するためのローカル Web UI です。
+Docker や仮想マシンを必要とせず、ホスト OS 上で直接起動して利用できる、軽量な個人向け Ollama Web UI です。
 
-Starlette ベースの軽量なサーバーで、チャット、セッション保存、ファイル添付、Web 検索/取得ツール、PDF テキスト抽出を提供します。既定ではローカルホストのみで待ち受け、PIN ログインで UI と API を保護します。
+ブラウザから Ollama とのストリーミングチャット、Web 検索・URL 取得、画像・ファイル・PDF 添付、MCP Tool Calling を利用できます。大規模で複雑な AI プラットフォームを導入せず、個人利用に必要な機能を小さな構成で使うことを意図しています。
 
 <img src="./docs/capture.gif" width="100%" alt="Screenshot of the chat" />
 
-## Features
+## 主な特徴
 
 - Ollama モデルとのストリーミングチャット
-- 会話セッションと添付ファイルのローカル保存
-- 画像添付のリサイズと vision モデル向け送信
-- Web 検索、URL スクレイピング、ファイル検索/取得、PDF テキスト抽出ツール
-- MCP クライアント機能：stdio / Streamable HTTP の MCP サーバーからツールを利用可能
-- PIN 認証、CSRF 保護、CSP、ローカル配布のフロントエンド依存ファイル
-- SSRF 対策付きの外部 URL 取得
+- Web 検索・URL 取得
+- 画像・ファイル・PDF 添付
+- stdio / Streamable HTTP による MCP ツール連携
+- Docker / VM 不要でホスト OS 上で直接動作
+- 会話履歴と添付ファイルのローカル保存
+- PIN 認証、CSRF・CSP・SSRF 対策
+- 日本語・英語 UI
 
 ## Requirements
 
