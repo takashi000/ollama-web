@@ -132,14 +132,6 @@ def _embed_images_in_content(message: Message) -> Message:
     return Message(**kwargs)
 
 
-def _tool_calls(response: Any) -> list[dict[str, Any]]:
-    """Extract tool calls from an ollama response in a tolerant manner."""
-    msg = getattr(response, "message", None) or (
-        response.get("message") if isinstance(response, dict) else None
-    )
-    return _tool_calls_from_message(msg)
-
-
 def _tool_calls_from_message(msg: Any) -> list[dict[str, Any]]:
     """Extract tool calls from a message object/dict."""
     if msg is None:
@@ -166,18 +158,6 @@ def _tool_calls_from_message(msg: Any) -> list[dict[str, Any]]:
     return out
 
 
-def _assistant_message(response: Any) -> Message:
-    """Convert a non-streaming response into a Message for re-submission."""
-    msg = getattr(response, "message", None) or (
-        response.get("message") if isinstance(response, dict) else None
-    )
-    if isinstance(msg, dict):
-        return Message(**msg)
-    if msg is not None:
-        return cast(Message, msg)
-    return Message(role="assistant", content="")
-
-
 def _token_counts(response: Any) -> dict[str, int] | None:
     """Extract prompt_eval_count and eval_count from an ollama response."""
     if response is None:
@@ -191,161 +171,6 @@ def _token_counts(response: Any) -> dict[str, int] | None:
     if prompt_eval is None or eval_count is None:
         return None
     return {"prompt_eval_count": int(prompt_eval), "eval_count": int(eval_count)}
-
-
-def chat_with_tools(
-    messages: list[Message],
-    model: str,
-    *,
-    think: bool | str | None = None,
-    registry: ToolRegistry | None = None,
-    host: str | None = None,
-    capabilities: set[str] | None = None,
-    options: dict[str, Any] | None = None,
-    language: str | None = None,
-) -> Iterator[dict[str, Any]]:
-    """Run a multi-round tool-calling chat and yield progress events.
-
-    Events are dicts with a ``type`` key:
-
-    - ``{"type": "tool_start", "name": str, "arguments": dict}``
-    - ``{"type": "tool_end", "name": str, "result": str}``
-    - ``{"type": "delta", "content": str}``
-    - ``{"type": "thinking", "content": str}``
-    - ``{"type": "done", "prompt_eval_count": int, "eval_count": int}``
-    - ``{"type": "error", "message": str}``
-
-    The final assistant message is streamed token-by-token via ``delta`` events.
-    """
-    import logging
-
-    logger = logging.getLogger("ollama_web.llm")
-
-    caps = capabilities or set()
-    raw_client = get_client(host)
-    reg = registry or default_registry()
-    tools: list[ToolCallable] = [cast(Any, t) for t in reg.ollama_tools]
-    effective_tools = tools if "tools" in caps else []
-    effective_think = think if "thinking" in caps else None
-
-    # Non-vision models cannot use the ``images`` field; embed them as base64.
-    if "vision" not in caps:
-        messages = [_embed_images_in_content(m) if _is_image_message(m) else m for m in messages]
-
-    cumulative_tool_chars = 0
-
-    rounds = 0
-    while rounds < MAX_TOOL_ROUNDS:
-        rounds += 1
-        logger.info(
-            "tool round %d/%d start messages=%d model=%s cumulative_tool_chars=%d",
-            rounds,
-            MAX_TOOL_ROUNDS,
-            len(messages),
-            model,
-            cumulative_tool_chars,
-        )
-        try:
-            resp = cast(Any, raw_client).chat(
-                model=model,
-                messages=messages,
-                tools=effective_tools,
-                think=effective_think,
-                options=options or None,
-                stream=False,
-            )
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("ollama chat call failed: %s", exc)
-            yield {"type": "error", "message": str(exc)}
-            return
-
-        calls = _tool_calls(resp)
-        tokens = _token_counts(resp)
-        if not calls:
-            # No tool calls: stream the final answer for UI effect.
-            content = _assistant_content(resp)
-            thinking = _assistant_thinking(resp)
-            if thinking:
-                yield {"type": "thinking", "content": thinking}
-            if content:
-                yield {"type": "delta", "content": content}
-            done_event: dict[str, Any] = {"type": "done"}
-            if tokens:
-                done_event.update(tokens)
-            yield done_event
-            return
-
-        # Append the assistant message that requested tool calls.
-        messages.append(_assistant_message(resp))
-
-        # Execute each requested tool and append tool-role messages.
-        tool_results: list[tuple[str, str]] = []
-        for call in calls:
-            name = call.get("name", "")
-            args = call.get("arguments", {})
-
-            yield {"type": "tool_start", "name": name, "arguments": _safe_tool_arguments(args)}
-            result = reg.execute(name, args if isinstance(args, dict) else json.dumps(args))
-            result = _safe_tool_result(_trim_tool_result(result, settings.max_tool_result_chars))
-            yield {"type": "tool_end", "name": name, "result": result}
-            tool_results.append((name, result))
-
-        if sum(len(r) for _, r in tool_results) > MAX_TOOL_CONTEXT_CHARS:
-            budget = MAX_TOOL_CONTEXT_CHARS - len(tool_results) * 200
-            max_per_tool = budget // max(1, len(tool_results))
-            logger.warning(
-                "tool results too large (%d chars), truncating to %d chars per tool",
-                sum(len(r) for _, r in tool_results),
-                max_per_tool,
-            )
-            tool_results = [(n, _trim_tool_result(r, max_per_tool)) for n, r in tool_results]
-
-        cumulative_tool_chars += sum(len(r) for _, r in tool_results)
-        for name, result in tool_results:
-            messages.append(Message(role="tool", tool_name=name, content=result))
-
-    # Exceeded tool rounds: ask for a final answer without tools.
-    logger.info(
-        (
-            "max tool rounds exceeded, requesting final answer without tools "
-            "(cumulative_tool_chars=%d)"
-        ),
-        cumulative_tool_chars,
-    )
-    yield {
-        "type": "status",
-        "message": t("status.tool_limit_reached", lang=language),
-    }
-    messages.append(
-        Message(
-            role="user",
-            content=get_prompt("tool_limit_instruction", lang=language),
-        )
-    )
-    try:
-        resp = cast(Any, raw_client).chat(
-            model=model,
-            messages=messages,
-            tools=[],
-            think=effective_think,
-            options=options or None,
-            stream=False,
-        )
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("final ollama chat call failed: %s", exc)
-        yield {"type": "error", "message": str(exc)}
-        return
-    tokens = _token_counts(resp)
-    content = _assistant_content(resp)
-    thinking = _assistant_thinking(resp)
-    if thinking:
-        yield {"type": "thinking", "content": thinking}
-    if content:
-        yield {"type": "delta", "content": content}
-    done_event_final: dict[str, Any] = {"type": "done"}
-    if tokens:
-        done_event_final.update(tokens)
-    yield done_event_final
 
 
 def _trim_tool_result(result: str, limit: int) -> str:
@@ -682,12 +507,6 @@ def _assistant_thinking(response: Any) -> str:
     if isinstance(msg, dict):
         return str(msg.get("thinking", "") or "")
     return str(getattr(msg, "thinking", "") or "")
-
-
-def _chunk_text(text: str, size: int) -> Iterator[str]:
-    """Yield successive chunks of ``text`` up to ``size`` characters."""
-    for i in range(0, len(text), size):
-        yield text[i : i + size]
 
 
 def _assistant_message_chunk(full_message: dict[str, Any]) -> Message | None:

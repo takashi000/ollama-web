@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -151,24 +152,28 @@ def test_options_are_forwarded_to_tool_and_final_rounds(monkeypatch: pytest.Monk
         def __init__(self) -> None:
             self.calls: list[dict[str, Any]] = []
 
-        def chat(self, **kwargs: Any) -> dict[str, Any]:
+        def chat(self, **kwargs: Any) -> list[SimpleNamespace]:
             self.calls.append(kwargs)
             if len(self.calls) == 1:
-                return {
-                    "message": {
-                        "role": "assistant",
-                        "content": "",
-                        "tool_calls": [{"function": {"name": "missing_tool", "arguments": {}}}],
-                    }
-                }
-            return {"message": {"role": "assistant", "content": "done"}}
+                return [
+                    SimpleNamespace(
+                        message={
+                            "role": "assistant",
+                            "content": "",
+                            "tool_calls": [
+                                {"function": {"name": "missing_tool", "arguments": {}}}
+                            ],
+                        }
+                    )
+                ]
+            return [SimpleNamespace(message={"content": "done"})]
 
     client = FakeClient()
     monkeypatch.setattr(llm, "get_client", lambda _host=None: client)
     monkeypatch.setattr(llm, "MAX_TOOL_ROUNDS", 1)
     options = {"temperature": 0.8, "num_ctx": 8192, "top_p": 0.9}
     events = list(
-        llm.chat_with_tools(
+        llm.stream_chat_with_tools(
             [Message(role="user", content="hello")],
             "test-model",
             capabilities={"tools"},

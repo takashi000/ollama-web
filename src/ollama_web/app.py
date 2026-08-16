@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
@@ -42,17 +44,29 @@ class NoCacheStaticFiles(StaticFiles):
 _STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 
+@asynccontextmanager
+async def _lifespan(app: Starlette) -> AsyncIterator[None]:
+    """Keep the application log handler scoped to the ASGI lifespan."""
+    log_dir = Path(app.state.settings.data_dir).resolve()
+    log_dir.mkdir(parents=True, exist_ok=True)
+    handler = logging.FileHandler(str(log_dir / "server.log"), encoding="utf-8")
+    handler.setFormatter(
+        logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+    )
+    logger = logging.getLogger("ollama_web")
+    previous_level = logger.level
+    logger.setLevel(logging.INFO)
+    logger.addHandler(handler)
+    try:
+        yield
+    finally:
+        logger.removeHandler(handler)
+        handler.close()
+        logger.setLevel(previous_level)
+
+
 def create_app() -> Starlette:
     """Build and return the configured Starlette application."""
-    # Ensure application logs are written alongside uvicorn access logs.
-    log_path = Path(settings.data_dir).resolve().parent / "server.log"
-    log_path.parent.mkdir(parents=True, exist_ok=True)
-    handler = logging.FileHandler(str(log_path), encoding="utf-8")
-    handler.setFormatter(logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s"))
-    root = logging.getLogger()
-    root.setLevel(logging.INFO)
-    root.addHandler(handler)
-
     routes = [
         Route("/login", pages_route.login, name="login_page"),
         Route("/api/auth/login", auth_route.login, methods=["POST"], name="auth_login"),
@@ -139,7 +153,7 @@ def create_app() -> Starlette:
             )
         )
 
-    app = Starlette(routes=routes, middleware=middleware)
+    app = Starlette(routes=routes, middleware=middleware, lifespan=_lifespan)
     app.state.settings = settings
     app.state.session_store = SessionStore(settings.data_dir)
     app.state.tool_names = ["web_search", "scrape_url", "search_and_fetch", "pdf_to_text"]

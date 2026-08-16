@@ -114,6 +114,55 @@ def test_web_search_mocked():
     assert result[0]["title"] == "T"
 
 
+def test_web_search_returns_empty_list_for_no_provider_results() -> None:
+    from ollama_web.tools import search as search_mod
+
+    class EmptyDDGS:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return None
+
+        def text(self, query, max_results=5):
+            return []
+
+    with patch.object(search_mod, "DDGS", EmptyDDGS):
+        assert search_mod.web_search("nothing found") == []
+
+
+def test_web_search_logs_and_propagates_provider_errors(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    from ollama_web.tools import search as search_mod
+
+    class FailingDDGS:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return None
+
+        def text(self, query, max_results=5):
+            raise RuntimeError("403 Forbidden")
+
+    with (
+        patch.object(search_mod, "DDGS", FailingDDGS),
+        caplog.at_level("ERROR", logger="ollama_web.tools.search"),
+    ):
+        with pytest.raises(RuntimeError, match="403 Forbidden"):
+            search_mod.web_search("private search terms")
+
+    assert "DuckDuckGo web search failed" in caplog.text
+    assert "private search terms" not in caplog.text
+
+    registry = ToolRegistry()
+    registry.register(search_mod.web_search)
+    with patch.object(search_mod, "DDGS", FailingDDGS):
+        result = json.loads(registry.execute("web_search", {"query": "test"}))
+    assert result == {"error": "RuntimeError: 403 Forbidden"}
+
+
 # ---------------------------------------------------------------------------
 # scrape_url tests (existing + pagination)
 # ---------------------------------------------------------------------------

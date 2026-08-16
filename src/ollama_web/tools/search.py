@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import logging
+
 from ddgs import DDGS
 
 from ..config import settings
+
+logger = logging.getLogger(__name__)
 
 
 def web_search(query: str, max_results: int | None = None) -> list[dict[str, str]]:
@@ -16,7 +20,8 @@ def web_search(query: str, max_results: int | None = None) -> list[dict[str, str
 
     Returns:
       A list of dictionaries with keys 'title', 'href' and 'body' for each
-      result. Returns an empty list if the search fails or no results are found.
+      result. Returns an empty list if no results are found. Provider failures
+      are logged and propagated to the tool execution layer.
     """
     if not query or not query.strip():
         return []
@@ -37,7 +42,9 @@ def web_search(query: str, max_results: int | None = None) -> list[dict[str, str
                     }
                 )
     except Exception:  # noqa: BLE001
-        # Swallow network/runtime errors so the chat loop can continue.
-        return []
+        # Preserve the provider exception for the tool layer while recording
+        # the traceback without logging the potentially sensitive query.
+        logger.exception("DuckDuckGo web search failed")
+        raise
 
     return results[:limit]
