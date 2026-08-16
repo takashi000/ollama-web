@@ -326,7 +326,7 @@ def chat_with_tools(
         resp = cast(Any, raw_client).chat(
             model=model,
             messages=messages,
-            tools=effective_tools,
+            tools=[],
             think=effective_think,
             options=options or None,
             stream=False,
@@ -596,7 +596,7 @@ def stream_chat_with_tools(
         stream = cast(Any, raw_client).chat(
             model=model,
             messages=messages,
-            tools=effective_tools,
+            tools=[],
             think=effective_think,
             options=options or None,
             stream=True,
