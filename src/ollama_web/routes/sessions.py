@@ -11,7 +11,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 from ..sessions import _IMAGE_MIMES, _IMAGE_SUFFIXES, SessionStore, is_valid_id
-from ..tools.helper.pdf import extract_pdf_text
+from ..tools.helper.pdf import extract_pdf_page
 
 logger = logging.getLogger("ollama_web.sessions")
 
@@ -127,8 +127,17 @@ async def upload_file(request: Request) -> JSONResponse:
             # Images are passed to ollama via Message.images (base64), not as text.
             text = ""
         elif content_type == "application/pdf" or name.lower().endswith(".pdf"):
-            # extract_pdf_text now returns (text, has_more, next_page_offset).
-            text = extract_pdf_text(data)[0]
+            # Store only a bounded preview. The chat-scoped PDF tool reads the
+            # original bytes on demand and exposes the lossless continuation.
+            preview_limit = min(
+                request.app.state.settings.max_attachment_text_chars,
+                request.app.state.settings.max_tool_result_chars,
+            )
+            text = extract_pdf_page(
+                data,
+                max_chars=preview_limit,
+                max_size_mb=request.app.state.settings.max_upload_mb,
+            ).text
         else:
             # Try decode as text for text-like uploads.
             try:

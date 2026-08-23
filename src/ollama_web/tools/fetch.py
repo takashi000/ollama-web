@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import mimetypes
 import re
 from pathlib import Path
@@ -9,17 +10,24 @@ from typing import Any
 
 from ..config import settings
 from ..prompts import get_prompt, get_prompts
-from .helper.pagination import format_paged_result, make_token, parse_token
-from .helper.pdf import extract_pdf_text
+from .helper.pagination import (
+    PageResult,
+    PageSizeError,
+    format_page_to_limit,
+    make_token,
+    parse_token,
+    text_page,
+)
+from .helper.pdf import extract_pdf_page, legacy_pdf_offset_to_cursor
 from .helper.safe_http import fetch_public_bytes
-from .scrape import scrape_url
+from .scrape import extract_readable_text
 from .search import web_search
 
 _FetchedFile = dict[str, Any]
 
 # Per-session temporary storage for files fetched by search_and_fetch.
 # The chat route drains this after the tool call finishes.
-_fetched_files: dict[str, list[_FetchedFile]] = {}
+_fetched_files: dict[str, dict[str, _FetchedFile]] = {}
 
 
 _FILETYPE_SUFFIXES: dict[str, str] = {
@@ -37,6 +45,7 @@ _FILETYPE_SUFFIXES: dict[str, str] = {
 }
 
 _TOOL_NAME = "search_and_fetch"
+logger = logging.getLogger("ollama_web.tools.fetch")
 
 
 def _slim_matched(matched: list[dict[str, str]]) -> list[dict[str, str]]:
@@ -53,12 +62,6 @@ def _slim_matched(matched: list[dict[str, str]]) -> list[dict[str, str]]:
     return [{"title": m.get("title", ""), "href": m.get("href", "")} for m in matched]
 
 
-def set_session_context(session_id: str | None) -> None:
-    """Set the active session id so fetched files can be persisted later."""
-    # No-op marker kept for future hooks; storage is keyed by session_id directly.
-    pass
-
-
 def store_fetched_file(
     session_id: str,
     name: str,
@@ -69,7 +72,8 @@ def store_fetched_file(
 ) -> None:
     """Store a fetched file so the chat route can persist it to the session."""
     if session_id:
-        _fetched_files.setdefault(session_id, []).append(
+        _fetched_files.setdefault(session_id, {}).setdefault(
+            url,
             {
                 "name": name,
                 "data": data,
@@ -82,7 +86,7 @@ def store_fetched_file(
 
 def pop_fetched_files(session_id: str) -> list[_FetchedFile]:
     """Return and clear any files fetched for the given session."""
-    return _fetched_files.pop(session_id, [])
+    return list(_fetched_files.pop(session_id, {}).values())
 
 
 def _normalize_file_type(file_type: str) -> str:
@@ -118,44 +122,10 @@ def _fetch_bytes(url: str) -> bytes:
     return data
 
 
-def _text_from_bytes(url: str, data: bytes, file_type: str, max_chars: int) -> str:
-    import httpx
-
-    name = Path(httpx.URL(url).path or "file").name or f"file.{file_type}"
-    if not name or "." not in name:
-        name = f"file.{file_type}"
-
-    if file_type == "pdf":
-        text, _, _ = extract_pdf_text(data, max_chars=max_chars, page_offset=0)
-        return text
-
-    # Decode text-like formats.
-    try:
-        text = data.decode("utf-8")
-    except UnicodeDecodeError:
-        try:
-            text = data.decode("cp932")
-        except UnicodeDecodeError:
-            text = data.decode("utf-8", errors="replace")
-
-    if file_type in {"html", "htm"}:
-        text = scrape_url(url, max_chars=max_chars)
-
-    if len(text) > max_chars:
-        text = text[:max_chars].rsplit(" ", 1)[0] + "\n…[truncated]"
-    return text
-
-
 def _full_text_for_file(url: str, data: bytes, file_type: str) -> str:
-    """Return the *full* extracted text for a file (no truncation).
-
-    Used by the pagination path so we can slice arbitrary offsets. For PDFs we
-    extract all pages; for text-like formats we decode the full payload.
-    """
+    """Decode a complete text-like file for character-offset pagination."""
     if file_type == "pdf":
-        # Extract with a very large char budget to get the full text.
-        text, _, _ = extract_pdf_text(data, max_chars=10_000_000, page_offset=0)
-        return text
+        raise ValueError("PDF files must use page-and-character cursor pagination.")
 
     try:
         text = data.decode("utf-8")
@@ -166,10 +136,7 @@ def _full_text_for_file(url: str, data: bytes, file_type: str) -> str:
             text = data.decode("utf-8", errors="replace")
 
     if file_type in {"html", "htm"}:
-        # Reuse scrape_url's cleaning but request a large budget to get the
-        # full cleaned text. scrape_url itself now supports pagination, but
-        # here we want the full body for manual slicing.
-        text = scrape_url(url, max_chars=10_000_000)
+        text = extract_readable_text(data)
     return text
 
 
@@ -223,19 +190,43 @@ def search_and_fetch(
             payload = parse_token(continue_from, _TOOL_NAME)
         except ValueError as exc:
             return f"Invalid continuation token: {exc}"
-        resumed_matched = payload.get("matched", [])
-        if not isinstance(resumed_matched, list) or not resumed_matched:
+        raw_matched = payload.get("matched", [])
+        if not isinstance(raw_matched, list) or not raw_matched:
             return (
                 get_prompt("fetch.no_results", fallback="")
                 .replace("{file_type}", ft)
                 .replace("{query}", query)
             )
-        file_idx = int(payload.get("file_idx", 0))
-        file_offset = int(payload.get("offset", 0))
+        resumed_matched = [
+            {"title": str(item.get("title", "")), "href": str(item.get("href", ""))}
+            for item in raw_matched
+            if isinstance(item, dict)
+        ]
+        if payload.get("v") == 2 and payload.get("file_type") != ft:
+            return "Invalid continuation token: file type does not match."
+        try:
+            file_idx = int(payload.get("file_idx", 0))
+            file_offset = int(payload.get("file_offset", payload.get("offset", 0)))
+            pdf_page_index = int(payload.get("pdf_page_index", 0))
+            pdf_page_char_offset = int(payload.get("pdf_page_char_offset", 0))
+        except (TypeError, ValueError) as exc:
+            return f"Invalid continuation token: cursor is not an integer: {exc}"
+        legacy_pdf_offset = (
+            file_offset
+            if payload.get("v") == 1 and "pdf_page_index" not in payload
+            else None
+        )
+        if min(file_idx, file_offset, pdf_page_index, pdf_page_char_offset) < 0:
+            return "Invalid continuation token: cursor values must not be negative."
+        if not resumed_matched or file_idx >= len(resumed_matched):
+            return "Invalid continuation token: file index is out of range."
         return _render_file_page(
             matched=resumed_matched,
             file_idx=file_idx,
             file_offset=file_offset,
+            pdf_page_index=pdf_page_index,
+            pdf_page_char_offset=pdf_page_char_offset,
+            legacy_pdf_offset=legacy_pdf_offset,
             ft=ft,
             per_file_chars=per_file_chars,
             session_id=session_id,
@@ -265,6 +256,9 @@ def search_and_fetch(
         matched=matched,
         file_idx=0,
         file_offset=0,
+        pdf_page_index=0,
+        pdf_page_char_offset=0,
+        legacy_pdf_offset=None,
         ft=ft,
         per_file_chars=per_file_chars,
         session_id=session_id,
@@ -277,6 +271,9 @@ def _render_file_page(
     matched: list[dict[str, str]],
     file_idx: int,
     file_offset: int,
+    pdf_page_index: int,
+    pdf_page_char_offset: int,
+    legacy_pdf_offset: int | None,
     ft: str,
     per_file_chars: int,
     session_id: str | None,
@@ -288,8 +285,7 @@ def _render_file_page(
     re-run the web search.
     """
     if file_idx >= len(matched):
-        # All candidates exhausted.
-        return format_paged_result("", has_more=False, next_token=None)
+        return ""
 
     item = matched[file_idx]
     url = item.get("href", "")
@@ -305,59 +301,157 @@ def _render_file_page(
             f"=== {p['candidate']} {file_idx + 1} ===\n"
             f"URL: {url}\n{p['title']}: {title}\n{p['status']}: {p['fetch_failed']} ({exc})\n"
         )
-        next_token = make_token(
-            _TOOL_NAME,
-            url,
-            0,
-            matched=_slim_matched(matched),
-            file_idx=file_idx + 1,
-            file_offset=0,
+        has_more = file_idx + 1 < len(matched)
+        cursor = {
+            "file_idx": file_idx + 1,
+            "file_offset": 0,
+            "pdf_page_index": 0,
+            "pdf_page_char_offset": 0,
+        }
+        page = PageResult(body, cursor, cursor, has_more)
+        return format_page_to_limit(
+            lambda _budget: page,
+            lambda next_cursor: _make_fetch_token(matched, next_cursor, ft),
+            requested_chars=per_file_chars,
+            result_limit=settings.max_tool_result_chars,
         )
-        return format_paged_result(body, has_more=True, next_token=next_token)
-
-    full_text = _full_text_for_file(url, data, ft)
-    page_text = full_text[file_offset : file_offset + per_file_chars]
-    has_more_in_file = len(full_text) > file_offset + per_file_chars
 
     import httpx
 
     mime = _guess_mime(Path(httpx.URL(url).path or f"file.{ft}").name, ft)
     name = Path(httpx.URL(url).path or f"file.{ft}").name
-    if session_id:
-        store_fetched_file(session_id, name, data, mime, page_text, url)
-
-    body = (
+    prefix = (
         f"=== {p['candidate']} {file_idx + 1} ===\n"
         f"URL: {url}\n"
         f"{p['title']}: {title}\n"
         f"{p['type']}: {mime}\n"
         f"{p['size']}: {len(data)} bytes\n"
-        f"{p['chars']}: {len(page_text)}\n"
-        f"{p['separator']}\n{page_text}\n"
+        f"{p['separator']}\n"
     )
 
-    if has_more_in_file:
-        # Continue within the same file.
-        next_token = make_token(
-            _TOOL_NAME,
-            url,
-            file_offset + per_file_chars,
-            matched=_slim_matched(matched),
-            file_idx=file_idx,
-            file_offset=file_offset + per_file_chars,
-        )
-        return format_paged_result(body, has_more=True, next_token=next_token)
+    if ft == "pdf":
+        if legacy_pdf_offset is not None:
+            try:
+                pdf_page_index, pdf_page_char_offset = legacy_pdf_offset_to_cursor(
+                    data, legacy_pdf_offset
+                )
+            except Exception as exc:  # noqa: BLE001
+                return f"Invalid continuation token: {exc}"
+        preview = extract_pdf_page(data, max_chars=min(per_file_chars, 1000)).text
 
-    # Move to the next candidate file.
-    if file_idx + 1 < len(matched):
-        next_token = make_token(
-            _TOOL_NAME,
-            url,
-            0,
-            matched=_slim_matched(matched),
-            file_idx=file_idx + 1,
-            file_offset=0,
-        )
-        return format_paged_result(body, has_more=True, next_token=next_token)
+        def page_factory(body_budget: int) -> PageResult:
+            source_page = extract_pdf_page(
+                data,
+                max_chars=body_budget,
+                page_index=pdf_page_index,
+                page_char_offset=pdf_page_char_offset,
+            )
+            if source_page.has_more:
+                next_cursor = {
+                    "file_idx": file_idx,
+                    "file_offset": 0,
+                    "pdf_page_index": source_page.next_cursor["page_index"],
+                    "pdf_page_char_offset": source_page.next_cursor["page_char_offset"],
+                }
+                has_more = True
+            else:
+                next_cursor = {
+                    "file_idx": file_idx + 1,
+                    "file_offset": 0,
+                    "pdf_page_index": 0,
+                    "pdf_page_char_offset": 0,
+                }
+                has_more = file_idx + 1 < len(matched)
+            return PageResult(
+                source_page.text,
+                {
+                    "file_idx": file_idx,
+                    "file_offset": 0,
+                    "pdf_page_index": pdf_page_index,
+                    "pdf_page_char_offset": pdf_page_char_offset,
+                },
+                next_cursor,
+                has_more,
+                source_page.warnings,
+            )
 
-    return format_paged_result(body, has_more=False, next_token=None)
+    else:
+        full_text = _full_text_for_file(url, data, ft)
+        preview = full_text[: min(per_file_chars, 1000)]
+
+        def page_factory(body_budget: int) -> PageResult:
+            source_page = text_page(full_text, file_offset, body_budget)
+            if source_page.has_more:
+                next_cursor = {
+                    "file_idx": file_idx,
+                    "file_offset": source_page.next_cursor["offset"],
+                    "pdf_page_index": 0,
+                    "pdf_page_char_offset": 0,
+                }
+                has_more = True
+            else:
+                next_cursor = {
+                    "file_idx": file_idx + 1,
+                    "file_offset": 0,
+                    "pdf_page_index": 0,
+                    "pdf_page_char_offset": 0,
+                }
+                has_more = file_idx + 1 < len(matched)
+            return PageResult(
+                source_page.text,
+                {
+                    "file_idx": file_idx,
+                    "file_offset": file_offset,
+                    "pdf_page_index": 0,
+                    "pdf_page_char_offset": 0,
+                },
+                next_cursor,
+                has_more,
+            )
+
+    if session_id:
+        store_fetched_file(session_id, name, data, mime, preview, url)
+
+    try:
+        result = format_page_to_limit(
+            page_factory,
+            lambda cursor: _make_fetch_token(matched, cursor, ft),
+            requested_chars=per_file_chars,
+            result_limit=settings.max_tool_result_chars,
+            prefix=prefix,
+            suffix="\n",
+        )
+        logger.info(
+            (
+                "fetch page type=%s file_idx=%d file_offset=%d pdf_page_index=%d "
+                "pdf_page_char_offset=%d result_chars=%d has_more=%s"
+            ),
+            ft,
+            file_idx,
+            file_offset,
+            pdf_page_index,
+            pdf_page_char_offset,
+            len(result),
+            "---page-info---" in result,
+        )
+        return result
+    except (PageSizeError, ValueError) as exc:
+        return f"File pagination failed: {exc}"
+
+
+def _make_fetch_token(
+    matched: list[dict[str, str]], cursor: dict[str, int], file_type: str
+) -> str:
+    file_idx = cursor["file_idx"]
+    url = matched[file_idx].get("href", "") if file_idx < len(matched) else "completed"
+    return make_token(
+        _TOOL_NAME,
+        url,
+        cursor["file_offset"],
+        matched=_slim_matched(matched),
+        file_idx=file_idx,
+        file_offset=cursor["file_offset"],
+        pdf_page_index=cursor["pdf_page_index"],
+        pdf_page_char_offset=cursor["pdf_page_char_offset"],
+        file_type=file_type,
+    )

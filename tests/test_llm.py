@@ -236,3 +236,112 @@ def test_stream_chat_with_tools_disables_mcp_tools_for_final_answer_after_limit(
     assert any(event.get("type") == "status" for event in events)
     assert any(event == {"type": "delta", "content": "final answer"} for event in events)
     assert events[-1] == {"type": "done"}
+
+
+def test_paged_source_limit_emits_incomplete_warning(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from ollama_web import llm
+
+    registry = ToolRegistry()
+
+    def scrape_url(url: str) -> str:
+        """Return a paged result."""
+        return "body\n---page-info---\nhas_more: true\nnext_token: token"
+
+    registry.register(scrape_url)
+
+    class FakeClient:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, Any]] = []
+
+        def chat(self, **kwargs: Any) -> list[SimpleNamespace]:
+            self.calls.append(kwargs)
+            if len(self.calls) == 1:
+                return [
+                    SimpleNamespace(
+                        message={
+                            "content": "",
+                            "tool_calls": [
+                                {
+                                    "function": {
+                                        "name": "scrape_url",
+                                        "arguments": {"url": "https://example.com"},
+                                    }
+                                }
+                            ],
+                        }
+                    )
+                ]
+            return [SimpleNamespace(message={"content": "partial answer"})]
+
+    client = FakeClient()
+    monkeypatch.setattr(llm, "get_client", lambda _host=None: client)
+    monkeypatch.setattr(llm, "MAX_TOOL_ROUNDS", 1)
+    events = list(
+        llm.stream_chat_with_tools(
+            [Message(role="user", content="read all")],
+            model="test-model",
+            registry=registry,
+            capabilities={"tools"},
+            language="en",
+        )
+    )
+    assert any(event.get("type") == "warning" for event in events)
+    final_instruction = str(client.calls[-1]["messages"][-1].content)
+    assert "unread content" in final_instruction
+
+
+def test_paged_tool_is_not_executed_when_context_budget_is_exhausted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from ollama_web import llm
+
+    executed: list[str] = []
+    registry = ToolRegistry()
+
+    def pdf_to_text(url_or_path: str) -> str:
+        """Read a PDF."""
+        executed.append(url_or_path)
+        return "should not execute"
+
+    registry.register(pdf_to_text)
+
+    class FakeClient:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def chat(self, **kwargs: Any) -> list[SimpleNamespace]:
+            self.calls += 1
+            if self.calls == 1:
+                return [
+                    SimpleNamespace(
+                        message={
+                            "content": "",
+                            "tool_calls": [
+                                {
+                                    "function": {
+                                        "name": "pdf_to_text",
+                                        "arguments": {"url_or_path": "https://example.com/a.pdf"},
+                                    }
+                                }
+                            ],
+                        }
+                    )
+                ]
+            return [SimpleNamespace(message={"content": "partial"})]
+
+    monkeypatch.setattr(llm, "get_client", lambda _host=None: FakeClient())
+    monkeypatch.setattr(llm, "MAX_TOOL_CONTEXT_CHARS", 1000)
+    monkeypatch.setattr(llm, "MAX_TOOL_ROUNDS", 1)
+    events = list(
+        llm.stream_chat_with_tools(
+            [Message(role="user", content="read all")],
+            model="test-model",
+            registry=registry,
+            capabilities={"tools"},
+            language="en",
+        )
+    )
+    assert executed == []
+    assert any("budget exhausted" in event.get("result", "") for event in events)

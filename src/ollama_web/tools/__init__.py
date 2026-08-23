@@ -2,7 +2,7 @@
 
 from .fetch import search_and_fetch
 from .helper.image import resize_image
-from .helper.pdf import extract_pdf_text
+from .helper.pdf import extract_pdf_page, extract_pdf_text
 from .pdf import pdf_to_text
 from .registry import ToolRegistry, all_tool_callables, default_registry
 from .scrape import scrape_url
@@ -12,6 +12,7 @@ __all__ = [
     "search_and_fetch",
     "resize_image",
     "extract_pdf_text",
+    "extract_pdf_page",
     "pdf_to_text",
     "ToolRegistry",
     "all_tool_callables",

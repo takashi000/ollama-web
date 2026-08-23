@@ -23,7 +23,7 @@ ollama-web は LLM（Ollama）にツール呼び出し（function calling）機�
 
 ツールの登録・実行は [`ToolRegistry`](src/ollama_web/tools/registry.py:17) が担い、チャットループ（[`llm.py`](src/ollama_web/llm.py:1)）経由で LLM から呼び出されます。
 
-`scrape_url` / `pdf_to_text` / `search_and_fetch` は**ページング（継続トークン方式）に対応**しています。`web_search` は API 呼び出し回数とキャッシュ要件の懸念からページング対象外です。
+`scrape_url` / `pdf_to_text` / `search_and_fetch` は**損失なしページング（継続トークン方式）に対応**しています。本文・メタデータ・継続トークンを含む結果全体をLLM側の上限内に収めてからカーソルを確定します。`web_search` はページング対象外です。
 
 ## ツール一覧
 
@@ -114,13 +114,13 @@ next_token: {token}
 ## 3. pdf_to_text
 
 - **実装**: [`pdf_to_text()`](src/ollama_web/tools/pdf.py:10)
-- **依存**: [`extract_pdf_text()`](src/ollama_web/tools/helper/pdf.py:12)（[`pypdf`](https://pypdf.readthedocs.io/) 使用）
+- **依存**: [`extract_pdf_page()`](src/ollama_web/tools/helper/pdf.py:12)（[`pypdf`](https://pypdf.readthedocs.io/) 使用）
 
 ### スキーマ
 
 | パラメータ | 型 | 必須 | デフォルト | 説明 |
 |------------|----|------|------------|------|
-| `url_or_path` | `str` | ✅ | — | PDF の URL またはローカルパス。空文字列は `"Invalid PDF source."` を返す |
+| `url_or_path` | `str` | ✅ | — | HTTP(S) PDF URL。チャット内では現在のセッションの `attachment:<file_id>` も利用可能。任意のローカルパスは拒否 |
 | `max_chars` | `int \| None` | ❌ | [`settings.fetch_max_chars`](src/ollama_web/config.py:52) (=8000) | 1ページあたりの返却文字数上限 |
 | `continue_from` | `str \| None` | ❌ | `None` | 前回戻り値の `next_token`。指定時は続きページを取得 |
 
@@ -130,26 +130,26 @@ next_token: {token}
 
 ### 制約
 
-- **`http://` / `https://` のみサポート**。ローカルパスは `"Only http(s) PDF URLs are supported."` を返す。
-- [`extract_pdf_text()`](src/ollama_web/tools/helper/pdf.py:12) 側の制約:
+- 通常は **`http://` / `https://` のみサポート**。チャット内のセッションスコープ付きラッパーだけが `attachment:<file_id>` を解決する。
+- [`extract_pdf_page()`](src/ollama_web/tools/helper/pdf.py:12) 側の制約:
   - [`settings.max_fetch_mb`](src/ollama_web/config.py:53) (=10MB) 超過時は `"PDF exceeds the configured size limit."`
-  - 1回あたり [`settings.max_pdf_pages`](src/ollama_web/config.py:54) (=25) ページまで抽出
-  - `page_offset` から `max_pdf_pages` 件を対象に抽出（ページング時）
-  - `max_chars` 超過時は単語境界で切り詰め `…[truncated]` を付与
+  - 1回あたり [`settings.max_pdf_pages`](src/ollama_web/config.py:54) (=25) ページまで処理するが、26ページ目以降は継続可能
+  - `(page_index, page_char_offset)` から再開し、ページ途中の未返却文字を次回返す
+  - `max_chars` は要求上限で、結果全体を6000文字以内に収めるため本文が短くなる場合がある
 
 ### 処理フロー
 
-1. `continue_from` があればトークンから `(url, page_offset)` を復元
+1. `continue_from` があればトークンから `(url, page_index, page_char_offset)` を復元
 2. PDF を全件取得・解析
-3. `page_offset` ページ目から順にテキスト抽出し `max_chars` に達したら停止
-4. 残りページがあれば `has_more: true` + `next_token`（`page_offset = 最後に抽出したページ + 1`）を付与
+3. カーソル位置から、結果全体の上限内で実際に返せる文字数だけ抽出
+4. 未返却文字または残りページがあれば、その直後を指す `next_token` を付与
 
 ---
 
 ## 4. search_and_fetch
 
 - **実装**: [`search_and_fetch()`](src/ollama_web/tools/fetch.py:130)
-- **依存**: [`web_search()`](src/ollama_web/tools/search.py:10)、[`fetch_public_bytes()`](src/ollama_web/tools/helper/safe_http.py:72)、[`extract_pdf_text()`](src/ollama_web/tools/helper/pdf.py:12)、[`scrape_url()`](src/ollama_web/tools/scrape.py:11)
+- **依存**: [`web_search()`](src/ollama_web/tools/search.py:10)、[`fetch_public_bytes()`](src/ollama_web/tools/helper/safe_http.py:72)、[`extract_pdf_page()`](src/ollama_web/tools/helper/pdf.py:12)、[`scrape_url()`](src/ollama_web/tools/scrape.py:11)
 
 ### スキーマ
 
@@ -209,11 +209,11 @@ URL: {url}
 
 ### helper/pdf.py
 
-- **実装**: [`extract_pdf_text()`](src/ollama_web/tools/helper/pdf.py:12)
+- **実装**: [`extract_pdf_page()`](src/ollama_web/tools/helper/pdf.py:12)
 - `pypdf.PdfReader` でページごとに `extract_text()`。例外ページはスキップ。
-- `page_offset` パラメータで指定ページから抽出（ページング対応）。
-- 1回あたり `max_pdf_pages` 件まで、`max_chars` で切り詰め。
-- 戻り値は `(text, has_more, next_page_offset)` のタプル。
+- ページ番号とページ内文字位置の複合カーソルで再開する。
+- `max_pdf_pages` は1回の作業量だけを制限し、文書全体は制限しない。
+- 戻り値は本文、開始・次カーソル、`has_more`、ページ警告を持つ `PageResult`。
 
 ### helper/image.py
 
@@ -259,27 +259,24 @@ flowchart LR
 
 ## ツール結果の切り詰め（truncation）ポリシー
 
-ツール結果は LLM コンテキストに戻される前に**多段階**で切り詰められる。ページング対応ツールの `---page-info---` フッターは保護され、本文側が優先的に削られる。
+非ページング結果はLLMコンテキストへ戻す前に切り詰められる。ページング対応ツールは本文・メタデータ・トークンを含む結果全体を事前に上限内へ収め、LLM層では切り詰めない。境界違反時は本文と進行済みトークンを返さず、同じ呼び出しを再試行できるエラーにする。
 
 ```mermaid
 flowchart TD
-    T[ツール実行] --> S1[ステージ1: ツール内部 max_chars/max_pdf_pages で切り詰め]
-    S1 --> S2[ステージ2: llm.py _trim_tool_result で max_tool_result_chars=6000 に即時切り詰め]
-    S2 --> S3[ステージ3: 累積が MAX_TOOL_CONTEXT_CHARS=24000 超過時、各結果をさらに削る]
-    S3 --> S4[ステージ4: MAX_TOOL_ROUNDS=5 で連続ツール呼び出しを打ち切り]
+    T[ツール実行] --> S1[ページングツールが結果全体を6000文字以内に整形]
+    S1 --> S2[非ページング結果だけを llm.py で切り詰め]
+    S2 --> S3[累積コンテキスト予算到達前に次のページ呼び出しを停止]
+    S3 --> S4[MAX_TOOL_ROUNDS=5 で一般ツール呼び出しを打ち切り]
 ```
 
 | ステージ | 場所 | 関数/定数 | 制限値 |
 |----------|------|-----------|--------|
-| 1 | 各ツール内部 | `max_chars` / `max_pdf_pages` | ツールごと（デフォルト 4000〜8000文字 / 25ページ） |
-| 2 | [`llm.py`](src/ollama_web/llm.py:1) | [`_trim_tool_result()`](src/ollama_web/llm.py:1) / [`max_tool_result_chars`](src/ollama_web/config.py:58) | **6000文字**（各ツール結果ごとに即時適用） |
-| 3 | [`llm.py`](src/ollama_web/llm.py:1) | [`MAX_TOOL_CONTEXT_CHARS`](src/ollama_web/llm.py:1) | **24000文字**（累積超過時に各結果を再削り） |
+| 1 | 各ページングツール | `format_page_to_limit()` | **6000文字**（フッター込み） |
+| 2 | [`llm.py`](src/ollama_web/llm.py:1) | [`_trim_tool_result()`](src/ollama_web/llm.py:1) | 非ページング結果のみ切り詰め |
+| 3 | [`llm.py`](src/ollama_web/llm.py:1) | [`MAX_TOOL_CONTEXT_CHARS`](src/ollama_web/llm.py:1) | **24000文字**（次のページを実行前に停止） |
 | 4 | [`llm.py`](src/ollama_web/llm.py:1) | [`MAX_TOOL_ROUNDS`](src/ollama_web/llm.py:1) | **5ラウンド**（連続ツール呼び出し上限） |
 
-`_trim_tool_result()` は:
-- `---page-info---` フッターを含む結果は、フッターを保護し本文のみを切り詰める（段落境界 `\n\n` 優先、次に単語境界）
-- フッター無し時は従来ロジック（段落境界優先、次に単語境界）
-- 末尾に `…[tool result truncated]` を付与
+`_trim_tool_result()` はページング結果が上限を超えた場合、本文を部分返却せず再試行可能な境界エラーへ置換する。フッター無しの結果は従来どおり段落・単語境界で切り詰める。
 
 ---
 
@@ -296,7 +293,7 @@ flowchart TD
 
 ```json
 {
-  "v": 1,
+  "v": 2,
   "tool": "scrape_url",
   "url": "https://example.com/page",
   "offset": 4000
@@ -307,13 +304,16 @@ flowchart TD
 
 ```json
 {
-  "v": 1,
+  "v": 2,
   "tool": "search_and_fetch",
   "url": "https://example.com/file.pdf",
   "offset": 8000,
   "matched": [{"title": "...", "href": "..."}],
   "file_idx": 1,
-  "file_offset": 8000
+  "file_offset": 8000,
+  "pdf_page_index": 3,
+  "pdf_page_char_offset": 1200,
+  "file_type": "pdf"
 }
 ```
 
@@ -328,7 +328,7 @@ next_token: {token}
 ```
 
 - `has_more: false` のときは `next_token` 行を省略（フッター自体も付与しない）
-- `---page-info---` は [`_trim_tool_result()`](src/ollama_web/llm.py:1) の切り詰め対象外
+- 正常なページング結果全体が上限内に収まるため、`---page-info---` を含む結果は切り詰め対象外
 
 ### LLM誤用対策
 
@@ -368,5 +368,3 @@ sequenceDiagram
     Tool->>Tool: slice offset:offset+max_chars
     Tool-->>LLM: text + has_more:false
 ```
-
-実装の詳細設計は [`docs/pagination-plan.md`](pagination-plan.md) を参照。

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+from io import BytesIO
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -268,20 +270,30 @@ def test_scrape_url_short_text_no_next_token():
 # ---------------------------------------------------------------------------
 
 
-def _make_multipage_pdf(num_pages: int, text_per_page: str = "Page content. ") -> bytes:
-    """Build an in-memory multi-page PDF using pypdf's writer."""
+def _make_multipage_pdf(page_texts: list[str]) -> bytes:
+    """Build a text-bearing PDF fixture without an additional dependency."""
     from pypdf import PdfWriter
+    from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
 
     writer = PdfWriter()
-    for _ in range(num_pages):
-        writer.add_blank_page(width=200, height=200)
-    # pypdf cannot easily inject text into blank pages; we rely on
-    # extract_text returning empty for blank pages. To get real text we use
-    # a reportlab-free approach: attach a content stream. For test purposes
-    # we instead patch extract_pdf_text to return deterministic text.
-    import io
-
-    buf = io.BytesIO()
+    font = DictionaryObject(
+        {
+            NameObject("/Type"): NameObject("/Font"),
+            NameObject("/Subtype"): NameObject("/Type1"),
+            NameObject("/BaseFont"): NameObject("/Helvetica"),
+        }
+    )
+    font_ref = writer._add_object(font)
+    for text in page_texts:
+        page = writer.add_blank_page(width=600, height=800)
+        page[NameObject("/Resources")] = DictionaryObject(
+            {NameObject("/Font"): DictionaryObject({NameObject("/F1"): font_ref})}
+        )
+        escaped = text.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+        stream = DecodedStreamObject()
+        stream.set_data(f"BT /F1 10 Tf 20 760 Td ({escaped}) Tj ET".encode("latin-1"))
+        page[NameObject("/Contents")] = writer._add_object(stream)
+    buf = BytesIO()
     writer.write(buf)
     return buf.getvalue()
 
@@ -302,47 +314,221 @@ def test_pdf_to_text_continue_from_invalid_token():
     assert "Invalid continuation token" in result
 
 
+def test_pdf_to_text_rejects_negative_page_character_cursor():
+    from ollama_web.tools.pdf import pdf_to_text
+
+    token = make_token(
+        "pdf_to_text",
+        "https://example.com/doc.pdf",
+        0,
+        page_index=0,
+        page_char_offset=-1,
+    )
+    result = pdf_to_text("https://example.com/doc.pdf", continue_from=token)
+    assert "Invalid continuation token" in result
+
+
 def test_pdf_to_text_pagination_roundtrip(monkeypatch):
-    """Pagination across pages reconstructs all page text."""
+    """Real PDF pagination reconstructs long pages and documents over 25 pages."""
+    from pypdf import PdfReader
+
     from ollama_web.tools import pdf as pdf_mod
-    from ollama_web.tools.helper import pdf as pdf_helper
 
-    # Patch extract_pdf_text to return deterministic pages.
-    pages = [f"PAGE{i} " + ("X" * 50) for i in range(6)]
-
-    def fake_extract(data, max_chars=None, page_offset=0):
-        limit = max_chars if max_chars and max_chars > 0 else 10_000
-        collected = ""
-        last = page_offset
-        for idx in range(page_offset, len(pages)):
-            collected += pages[idx]
-            last = idx
-            if len(collected) >= limit:
-                break
-        has_more = (last + 1) < len(pages)
-        return collected, has_more, last + 1 if has_more else 0
-
-    monkeypatch.setattr(pdf_helper, "extract_pdf_text", fake_extract)
-    monkeypatch.setattr(pdf_mod, "extract_pdf_text", fake_extract)
+    pages = [f"PAGE{i:02d}-" + ("X" * (7000 if i == 0 else 80)) for i in range(30)]
+    data = _make_multipage_pdf(pages)
+    expected = "\n\n".join(
+        (page.extract_text() or "") for page in PdfReader(BytesIO(data)).pages
+    )
 
     # Patch fetch_public_bytes to return dummy bytes.
     monkeypatch.setattr(
         pdf_mod,
         "fetch_public_bytes",
-        lambda url, timeout=None: (b"%PDF-1.4", "", "application/pdf"),
+        lambda url, timeout=None: (data, url, "application/pdf"),
     )
 
     collected = ""
     token = None
-    for _ in range(10):
+    for _ in range(50):
         result = pdf_mod.pdf_to_text(
-            "https://example.com/doc.pdf", max_chars=100, continue_from=token
+            "https://example.com/doc.pdf", max_chars=8000, continue_from=token
         )
+        assert len(result) <= 6000
         body_text, has_more, token = parse_paged_result(result)
         collected += body_text
         if not has_more:
             break
-    assert collected == "".join(pages)
+    assert collected == expected
+
+
+def test_session_pdf_tool_reads_original_bytes_and_is_session_scoped(tmp_path):
+    from pypdf import PdfReader
+
+    from ollama_web.sessions import SessionStore
+    from ollama_web.tools.pdf import make_session_pdf_tool
+
+    data = _make_multipage_pdf(["FIRST-" + "A" * 7000, "SECOND-" + "B" * 200])
+    expected = "\n\n".join(
+        (page.extract_text() or "") for page in PdfReader(BytesIO(data)).pages
+    )
+    store = SessionStore(tmp_path)
+    session = store.create()
+    other_session = store.create()
+    chat_file = store.add_file(
+        session["id"],
+        "document.pdf",
+        data,
+        "application/pdf",
+        "legacy truncated preview",
+    )
+    tool = make_session_pdf_tool(lambda file_id: store.get_file_data(session["id"], file_id))
+
+    token = None
+    collected = ""
+    for _ in range(10):
+        result = tool(f"attachment:{chat_file.id}", continue_from=token)
+        body, has_more, token = parse_paged_result(result)
+        collected += body
+        if not has_more:
+            break
+
+    assert collected == expected
+    other_tool = make_session_pdf_tool(
+        lambda file_id: store.get_file_data(other_session["id"], file_id)
+    )
+    assert "unavailable" in other_tool(f"attachment:{chat_file.id}").lower()
+
+
+def test_search_and_fetch_pdf_pagination_is_lossless_and_persists_once(monkeypatch):
+    from pypdf import PdfReader
+
+    from ollama_web.tools import fetch as fetch_mod
+
+    data = _make_multipage_pdf([f"P{i:02d}-" + "Z" * 300 for i in range(30)])
+    expected = "\n\n".join(
+        (page.extract_text() or "") for page in PdfReader(BytesIO(data)).pages
+    )
+    monkeypatch.setattr(
+        fetch_mod,
+        "web_search",
+        lambda query, max_results=None: [
+            {"title": "PDF", "href": "https://example.com/document.pdf", "body": ""}
+        ],
+    )
+    monkeypatch.setattr(
+        fetch_mod,
+        "fetch_public_bytes",
+        lambda url, timeout=None: (data, url, "application/pdf"),
+    )
+
+    token = None
+    collected = ""
+    for _ in range(20):
+        result = fetch_mod.search_and_fetch(
+            "query", "pdf", max_results=1, session_id="session", continue_from=token
+        )
+        assert len(result) <= 6000
+        body, has_more, token = parse_paged_result(result)
+        collected += body.split("---\n", 1)[1].removesuffix("\n")
+        if not has_more:
+            break
+
+    assert collected == expected
+    assert len(fetch_mod.pop_fetched_files("session")) == 1
+
+
+def test_search_and_fetch_accepts_legacy_v1_pdf_offset(monkeypatch):
+    import base64
+
+    from pypdf import PdfReader
+
+    from ollama_web.tools import fetch as fetch_mod
+
+    url = "https://example.com/legacy.pdf"
+    data = _make_multipage_pdf(["LEGACY-" + "Q" * 500])
+    expected = PdfReader(BytesIO(data)).pages[0].extract_text() or ""
+    matched = [{"title": "Legacy", "href": url}]
+    payload = {
+        "v": 1,
+        "tool": "search_and_fetch",
+        "url": url,
+        "offset": 100,
+        "file_offset": 100,
+        "file_idx": 0,
+        "matched": matched,
+    }
+    token = base64.urlsafe_b64encode(
+        json.dumps(payload, separators=(",", ":")).encode("ascii")
+    ).decode("ascii").rstrip("=")
+    monkeypatch.setattr(
+        fetch_mod, "fetch_public_bytes", lambda fetched_url, timeout=None: (data, url, "")
+    )
+    result = fetch_mod.search_and_fetch("query", "pdf", continue_from=token)
+    body, has_more, _ = parse_paged_result(result)
+    assert body.split("---\n", 1)[1].removesuffix("\n") == expected[100:]
+    assert has_more is False
+
+
+def test_attachment_context_keeps_pdf_continuation_and_registry_can_resume(tmp_path):
+    from ollama_web.routes.chat import _attachment_context, _build_registry
+    from ollama_web.sessions import SessionStore
+
+    data = _make_multipage_pdf(["ATTACHED-" + "R" * 8000])
+    store = SessionStore(tmp_path)
+    session = store.create()
+    chat_file = store.add_file(
+        session["id"], "attached.pdf", data, "application/pdf", "old preview"
+    )
+    context = _attachment_context(
+        store, session["id"], [chat_file.id], total_limit=5000
+    )
+    assert len(context) <= 5000
+    assert f'uri="attachment:{chat_file.id}"' in context
+    assert "next_token:" in context
+
+    registry = asyncio.run(_build_registry(session["id"], store))
+    first_result = context.split("<attached-file", 1)[1]
+    token = first_result.split("next_token:", 1)[1].splitlines()[0].strip()
+    resumed = registry.execute(
+        "pdf_to_text",
+        {"url_or_path": f"attachment:{chat_file.id}", "continue_from": token},
+    )
+    assert "unavailable" not in resumed.lower()
+
+
+def test_uploaded_pdf_can_be_resumed_from_original_file(tmp_path, monkeypatch):
+    from starlette.testclient import TestClient
+
+    from ollama_web.app import create_app
+    from ollama_web.config import settings
+    from ollama_web.routes.chat import _build_registry
+
+    data = _make_multipage_pdf(["UPLOAD-" + "U" * 8000])
+    monkeypatch.setattr(settings, "data_dir", str(tmp_path))
+    monkeypatch.setattr(settings, "pin", "123456")
+    app = create_app()
+    client = TestClient(app)
+    login = client.post("/api/auth/login", json={"pin": "123456"})
+    csrf = login.headers["x-csrf-token"]
+    session_id = client.post(
+        "/api/sessions", headers={"X-CSRF-Token": csrf}
+    ).json()["id"]
+    uploaded = client.post(
+        f"/api/sessions/{session_id}/files",
+        headers={"X-CSRF-Token": csrf},
+        files={"files": ("upload.pdf", data, "application/pdf")},
+    ).json()["files"][0]
+    assert len(uploaded["text"]) <= settings.max_tool_result_chars
+
+    registry = asyncio.run(_build_registry(session_id, app.state.session_store))
+    first = registry.execute("pdf_to_text", {"url_or_path": f"attachment:{uploaded['id']}"})
+    _, has_more, token = parse_paged_result(first)
+    assert has_more is True
+    resumed = registry.execute(
+        "pdf_to_text",
+        {"url_or_path": f"attachment:{uploaded['id']}", "continue_from": token},
+    )
+    assert "unavailable" not in resumed.lower()
 
 
 # ---------------------------------------------------------------------------
@@ -365,6 +551,27 @@ def test_search_and_fetch_continue_from_invalid_token():
 
     result = search_and_fetch("query", "pdf", continue_from="bad-token")
     assert "Invalid continuation token" in result
+
+
+def test_search_and_fetch_v2_token_is_bound_to_file_type(monkeypatch):
+    from ollama_web.tools import fetch as fetch_mod
+
+    monkeypatch.setattr(
+        fetch_mod,
+        "web_search",
+        lambda query, max_results=None: [
+            {"title": "Text", "href": "https://example.com/file.txt", "body": ""}
+        ],
+    )
+    monkeypatch.setattr(
+        fetch_mod,
+        "fetch_public_bytes",
+        lambda url, timeout=None: (b"A" * 200, url, "text/plain"),
+    )
+    first = fetch_mod.search_and_fetch("query", "txt", max_chars=50)
+    _, _, token = parse_paged_result(first)
+    result = fetch_mod.search_and_fetch("query", "pdf", continue_from=token)
+    assert "file type does not match" in result
 
 
 def test_search_and_fetch_pagination_across_files(monkeypatch):
@@ -401,6 +608,37 @@ def test_search_and_fetch_pagination_across_files(monkeypatch):
             break
     # Both files must be visited, in order.
     assert seen_titles == ["File1", "File2"]
+
+
+def test_search_and_fetch_long_html_uses_full_cleaned_source(monkeypatch):
+    from ollama_web.tools import fetch as fetch_mod
+
+    source = "".join(f"paragraph-{index:04d} " for index in range(1200))
+    html = f"<html><body><main>{source}</main></body></html>".encode()
+    monkeypatch.setattr(
+        fetch_mod,
+        "web_search",
+        lambda query, max_results=None: [
+            {"title": "Long HTML", "href": "https://example.com/page.html", "body": ""}
+        ],
+    )
+    monkeypatch.setattr(
+        fetch_mod,
+        "fetch_public_bytes",
+        lambda url, timeout=None: (html, url, "text/html; charset=utf-8"),
+    )
+
+    token = None
+    collected = ""
+    for _ in range(20):
+        result = fetch_mod.search_and_fetch(
+            "query", "html", max_results=1, continue_from=token
+        )
+        body, has_more, token = parse_paged_result(result)
+        collected += body.split("---\n", 1)[1].removesuffix("\n")
+        if not has_more:
+            break
+    assert collected == source.strip()
 
 
 def test_make_token_ensure_ascii_true():
@@ -531,7 +769,32 @@ def test_make_token_and_parse_token_roundtrip():
     assert payload["url"] == "https://example.com/page"
     assert payload["offset"] == 4000
     assert payload["tool"] == "scrape_url"
+    assert payload["v"] == 2
+
+
+def test_parse_token_accepts_legacy_v1_payload():
+    import base64
+
+    raw = json.dumps(
+        {"v": 1, "tool": "pdf_to_text", "url": "https://example.com/a.pdf", "offset": 3}
+    ).encode("ascii")
+    token = base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+    payload = parse_token(token, "pdf_to_text")
     assert payload["v"] == 1
+    assert payload["offset"] == 3
+
+
+def test_parse_token_rejects_negative_and_oversized_tokens():
+    import base64
+
+    raw = json.dumps(
+        {"v": 1, "tool": "scrape_url", "url": "https://example.com", "offset": -1}
+    ).encode("ascii")
+    negative = base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+    with pytest.raises(InvalidTokenError):
+        parse_token(negative, "scrape_url")
+    with pytest.raises(InvalidTokenError):
+        parse_token("A" * 9000, "scrape_url")
 
 
 def test_parse_token_invalid_base64():
@@ -609,18 +872,16 @@ def test_format_paged_result_marker_at_end():
 # ---------------------------------------------------------------------------
 
 
-def test_trim_tool_result_preserves_page_info():
+def test_trim_tool_result_rejects_oversized_paged_result_atomically():
     from ollama_web.llm import _trim_tool_result
 
     body = "A" * 5000
     footer = "\n---page-info---\nhas_more: true\nnext_token: tok123"
     result = body + footer
     trimmed = _trim_tool_result(result, 200)
-    assert "---page-info---" in trimmed
-    assert "next_token: tok123" in trimmed
-    assert "has_more: true" in trimmed
-    # Body should be truncated.
-    assert len(trimmed) < len(result)
+    assert "Repeat the same tool call" in trimmed
+    assert "tok123" not in trimmed
+    assert "A" * 20 not in trimmed
 
 
 def test_trim_tool_result_no_page_info_unchanged():

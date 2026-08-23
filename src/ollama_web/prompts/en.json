@@ -2,7 +2,9 @@
   "tool_system": "You can use web search, scraping, and file fetch tools. Do not run more searches than necessary in a single response; review the results before conducting the next investigation. Tool results are summarized, so grasp the important points and use them effectively. If a tool result is truncated, you can fetch the continuation using the next_token at the end of the result. Pass the next_token value verbatim to the continue_from parameter. Omit continue_from when no continuation is needed.",
   "current_time": "Current time: {time}",
   "tool_limit_instruction": "The tool call limit has been reached. Based on the search results and conversation so far, please summarize the final answer the user requested.",
+  "pagination_incomplete_instruction": "A paged source still has unread content. Answer only from the retrieved portion and do not claim that the full source was reviewed.",
   "attachment_prefix": "The following is the content of files attached by the user:",
+  "attachment_paging": "A PDF body is an initial preview. When has_more is true, pass the attached-file uri and next_token to pdf_to_text for the needed continuation. Do not claim to have read the full file while unread content remains.",
   "fetch": {
     "candidate": "Candidate",
     "title": "Title",

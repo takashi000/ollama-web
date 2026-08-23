@@ -16,7 +16,6 @@ from ollama._types import Image as OllamaImage
 from starlette.requests import Request
 from starlette.responses import StreamingResponse
 
-from ..config import settings
 from ..i18n import t
 from ..mcp import collect_mcp_tools, make_mcp_executor
 from ..prompts import get_prompt
@@ -24,6 +23,7 @@ from ..sessions import SessionStore, is_valid_id
 from ..settings_store import load_app_settings
 from ..tools.fetch import pop_fetched_files
 from ..tools.helper.image import resize_image
+from ..tools.pdf import make_session_pdf_tool
 from ..tools.registry import ToolRegistry, default_registry
 
 logger = logging.getLogger("ollama_web.chat")
@@ -65,7 +65,9 @@ def _parse_messages(raw: list[dict[str, Any]]) -> list[Message]:
     return out
 
 
-async def _build_registry(session_id: str | None) -> ToolRegistry:
+async def _build_registry(
+    session_id: str | None, store: SessionStore | None = None
+) -> ToolRegistry:
     """Return a registry with built-in tools and any configured MCP tools."""
     reg = default_registry()
 
@@ -80,6 +82,20 @@ async def _build_registry(session_id: str | None) -> ToolRegistry:
             return original(*bound.args, **bound.kwargs)
 
         reg._tools["search_and_fetch"] = wrapped  # noqa: SLF001
+
+    if session_id is not None and store is not None:
+
+        def load_pdf_attachment(file_id: str) -> bytes | None:
+            chat_file = store.get_file(session_id, file_id)
+            if chat_file is None or chat_file.is_image:
+                return None
+            if chat_file.mime.lower() != "application/pdf" and not chat_file.name.lower().endswith(
+                ".pdf"
+            ):
+                return None
+            return store.get_file_data(session_id, file_id)
+
+        reg._tools["pdf_to_text"] = make_session_pdf_tool(load_pdf_attachment)  # noqa: SLF001
 
     try:
         mcp_tools = await collect_mcp_tools()
@@ -105,20 +121,57 @@ async def _build_registry(session_id: str | None) -> ToolRegistry:
     return reg
 
 
-def _attachment_context(store: SessionStore, session_id: str, file_ids: list[str]) -> str:
-    parts: list[str] = []
+def _attachment_context(
+    store: SessionStore,
+    session_id: str,
+    file_ids: list[str],
+    *,
+    total_limit: int,
+) -> str:
+    if total_limit <= 0:
+        return ""
+    chat_files = []
     for file_id in file_ids:
         chat_file = store.get_file(session_id, file_id)
-        if chat_file is None or chat_file.is_image:
-            continue
-        text = _limit_text(chat_file.text or "", settings.max_attachment_text_chars)
-        parts.append(
+        if chat_file is not None and not chat_file.is_image:
+            chat_files.append(chat_file)
+    if not chat_files:
+        return ""
+
+    parts: list[str] = []
+    prefix = get_prompt("attachment_prefix")
+    paging_hint = get_prompt(
+        "attachment_paging",
+        fallback=(
+            "PDF previews may have unread content. Use pdf_to_text with the attachment URI "
+            "and next_token until has_more is absent."
+        ),
+    )
+    used = len(prefix) + len(paging_hint) + 4
+    per_file = max(256, min(4000, (total_limit - used) // max(1, len(chat_files))))
+    pdf_tool = make_session_pdf_tool(
+        lambda file_id: store.get_file_data(session_id, file_id)
+        if store.get_file(session_id, file_id) is not None
+        else None
+    )
+
+    for chat_file in chat_files:
+        source_uri = f"attachment:{chat_file.id}"
+        if chat_file.mime.lower() == "application/pdf" or chat_file.name.lower().endswith(".pdf"):
+            text = pdf_tool(source_uri, max_chars=per_file)
+        else:
+            text = _limit_text(chat_file.text or "", per_file)
+        block = (
             f'<attached-file name="{html.escape(chat_file.name)}" id="{chat_file.id}" '
-            f'source="{chat_file.source}">\n{text}\n</attached-file>'
+            f'source="{chat_file.source}" uri="{source_uri}">\n{text}\n</attached-file>'
         )
+        if used + len(block) + 2 > total_limit:
+            break
+        parts.append(block)
+        used += len(block) + 2
     if not parts:
         return ""
-    return "\n\n".join([get_prompt("attachment_prefix"), *parts])
+    return "\n\n".join([prefix, paging_hint, *parts])
 
 
 def _collect_images(store: SessionStore, session_id: str, file_ids: list[str]) -> list[bytes]:
@@ -217,7 +270,16 @@ async def _chat_event_stream(
 
         attachment_ctx = ""
         if session_id and file_ids:
-            attachment_ctx = _attachment_context(store, session_id, file_ids)
+            attachment_budget = max(
+                0,
+                request.app.state.settings.max_message_chars - len(user_content) - 256,
+            )
+            attachment_ctx = _attachment_context(
+                store,
+                session_id,
+                file_ids,
+                total_limit=attachment_budget,
+            )
 
         if attachment_ctx and user_content:
             # Inject attachment context into the latest user message.
@@ -247,7 +309,7 @@ async def _chat_event_stream(
 
         from ollama_web import llm  # local import to avoid circular at module load
 
-        registry = await _build_registry(session_id)
+        registry = await _build_registry(session_id, store)
 
         total_image_bytes = sum(
             len(img.value) for img in (getattr(messages[-1], "images", None) or [])

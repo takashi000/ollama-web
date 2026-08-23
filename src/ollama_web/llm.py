@@ -14,6 +14,7 @@ from .config import settings
 from .i18n import t
 from .mcp import redact_secrets
 from .prompts import get_prompt
+from .tools.helper.pagination import parse_paged_result, parse_token
 from .tools.registry import ToolRegistry, default_registry
 
 # Maximum successive tool-call rounds before we force a final answer.
@@ -176,29 +177,22 @@ def _token_counts(response: Any) -> dict[str, int] | None:
 def _trim_tool_result(result: str, limit: int) -> str:
     """Truncate ``result`` to ``limit`` chars while keeping it readable.
 
-    When the result contains a ``---page-info---`` footer (emitted by paged
-    tools), the footer is preserved and only the body is truncated so the
-    model can still see the ``next_token`` needed to fetch the continuation.
+    Paged tools must fit their own complete envelope before advancing a cursor.
+    An oversized paged result is therefore rejected atomically instead of
+    being truncated into an unrecoverable content gap.
     """
     if len(result) <= limit:
         return result
 
-    # Protect the page-info footer from truncation. ``split`` keeps the
-    # marker on the footer side so the ``---page-info---`` line is preserved.
+    # A paged tool must size its own body before advancing its cursor. Trimming
+    # it here would create an unrecoverable gap between visible text and the
+    # next token, so fail the call atomically and let the model repeat it.
     if _PAGE_INFO_MARKER in result:
-        body, footer = result.split(_PAGE_INFO_MARKER, 1)
-        footer = _PAGE_INFO_MARKER + footer
-        body_limit = limit - len(footer)
-        if body_limit <= 0:
-            # The footer alone exceeds the limit; keep it verbatim and drop the
-            # body entirely so the model can still continue paging.
-            return "…[tool result truncated]" + footer
-        if len(body) <= body_limit:
-            return result
-        cutoff = body[:body_limit].rsplit("\n\n", 1)[0]
-        if len(cutoff) < body_limit * 0.5:
-            cutoff = body[:body_limit].rsplit(" ", 1)[0]
-        return cutoff + "\n\n…[tool result truncated]" + footer
+        return (
+            "Paged tool result exceeded the context-safe result limit. "
+            "Repeat the same tool call with a smaller max_chars value; no part "
+            "of this page was consumed."
+        )
 
     # No footer: legacy truncation behaviour.
     cutoff = result[:limit].rsplit("\n\n", 1)[0]
@@ -206,6 +200,23 @@ def _trim_tool_result(result: str, limit: int) -> str:
         # No good paragraph boundary; cut at a space instead.
         cutoff = result[:limit].rsplit(" ", 1)[0]
     return cutoff + "\n\n…[tool result truncated]"
+
+
+def _paged_source_key(name: str, arguments: Any) -> tuple[str, str]:
+    """Identify one paged source without exposing its content."""
+    if not isinstance(arguments, dict):
+        return name, "unknown"
+    if name == "search_and_fetch":
+        return name, f"{arguments.get('query', '')}|{arguments.get('file_type', '')}"
+    token = arguments.get("continue_from")
+    if isinstance(token, str) and token:
+        try:
+            payload = parse_token(token, name)
+            return name, str(payload.get("url", "unknown"))
+        except ValueError:
+            pass
+    source = arguments.get("url_or_path", arguments.get("url", "unknown"))
+    return name, str(source)
 
 
 def stream_chat_with_tools(
@@ -242,6 +253,7 @@ def stream_chat_with_tools(
         messages = [_embed_images_in_content(m) if _is_image_message(m) else m for m in messages]
 
     cumulative_tool_chars = 0
+    outstanding_paged_sources: set[tuple[str, str]] = set()
 
     MAX_EMPTY_RETRIES = 2
     empty_retries = 0
@@ -339,6 +351,11 @@ def stream_chat_with_tools(
             messages.append(msg)
 
         if not tool_calls:
+            if outstanding_paged_sources:
+                yield {
+                    "type": "warning",
+                    "message": t("status.pagination_incomplete", lang=language),
+                }
             if is_empty:
                 # Ran out of tool rounds while still empty; surface a warning.
                 yield {
@@ -358,14 +375,41 @@ def stream_chat_with_tools(
         for call in tool_calls:
             name = call.get("name", "")
             args = call.get("arguments", {})
+            paged_source = _paged_source_key(name, args)
 
             yield {"type": "tool_start", "name": name, "arguments": _safe_tool_arguments(args)}
             t1 = time.time()
-            try:
-                result = reg.execute(name, args if isinstance(args, dict) else json.dumps(args))
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("tool %s execution failed in %.2fs: %s", name, time.time() - t1, exc)
-                result = f"Tool execution failed: {exc}"
+            remaining_context = MAX_TOOL_CONTEXT_CHARS - (
+                cumulative_tool_chars + total_result_len
+            )
+            is_builtin_paged = name in {"scrape_url", "pdf_to_text", "search_and_fetch"}
+            if is_builtin_paged and remaining_context < settings.max_tool_result_chars:
+                result = (
+                    "Tool context budget exhausted before this paged call was executed. "
+                    "Unread content remains; do not claim that the source was read in full."
+                )
+                outstanding_paged_sources.add(paged_source)
+                logger.info("paged tool skipped name=%s reason=context_budget", name)
+            else:
+                try:
+                    result = reg.execute(
+                        name, args if isinstance(args, dict) else json.dumps(args)
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "tool %s execution failed in %.2fs: %s", name, time.time() - t1, exc
+                    )
+                    result = f"Tool execution failed: {exc}"
+                raw_is_paged = _PAGE_INFO_MARKER in result
+                if raw_is_paged:
+                    _, _, next_token = parse_paged_result(result)
+                    if next_token and isinstance(args, dict):
+                        paged_source = _paged_source_key(
+                            name, {**args, "continue_from": next_token}
+                        )
+                    outstanding_paged_sources.add(paged_source)
+                elif is_builtin_paged:
+                    outstanding_paged_sources.discard(paged_source)
             # Always truncate per-tool result immediately so it does not bloat
             # the context even before we reach the cumulative limit.
             result = _safe_tool_result(_trim_tool_result(result, settings.max_tool_result_chars))
@@ -378,21 +422,6 @@ def stream_chat_with_tools(
             yield {"type": "tool_end", "name": name, "result": result}
             tool_results.append((name, result))
             total_result_len += len(result)
-
-        # If the accumulated tool results are still too large, truncate each
-        # one more aggressively to keep ollama's context processing fast.
-        if total_result_len > MAX_TOOL_CONTEXT_CHARS:
-            budget = MAX_TOOL_CONTEXT_CHARS - len(tool_results) * 200  # reserve footer per tool
-            max_per_tool = budget // max(1, len(tool_results))
-            logger.warning(
-                "tool results too large (%d chars), truncating to %d chars per tool",
-                total_result_len,
-                max_per_tool,
-            )
-            trimmed_results: list[tuple[str, str]] = []
-            for name, result in tool_results:
-                trimmed_results.append((name, _trim_tool_result(result, max_per_tool)))
-            tool_results = trimmed_results
 
         cumulative_tool_chars += sum(len(r) for _, r in tool_results)
         for name, result in tool_results:
@@ -410,10 +439,19 @@ def stream_chat_with_tools(
         "type": "status",
         "message": t("status.tool_limit_reached", lang=language),
     }
+    limit_instruction = get_prompt("tool_limit_instruction", lang=language)
+    if outstanding_paged_sources:
+        limit_instruction += "\n\n" + get_prompt(
+            "pagination_incomplete_instruction", lang=language
+        )
+        yield {
+            "type": "warning",
+            "message": t("status.pagination_incomplete", lang=language),
+        }
     messages.append(
         Message(
             role="user",
-            content=get_prompt("tool_limit_instruction", lang=language),
+            content=limit_instruction,
         )
     )
     t0 = time.time()

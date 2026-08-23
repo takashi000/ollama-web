@@ -76,6 +76,7 @@
     "connecting": "接続中...",
     "disconnected": "切断しました",
     "tool_limit_reached": "ツール呼び出し上限に達しました。これまでの調査結果を整理中…",
+    "pagination_incomplete": "資料に未取得部分があります。取得済み範囲のみで回答します。",
     "thinking": "思考プロセス",
     "executing_tool": "{label} を実行中…",
     "running": "実行中…",
