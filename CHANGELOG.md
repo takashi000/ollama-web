@@ -7,6 +7,8 @@
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-08-26
+
 ### Changed
 
 - PDFページングをページ番号とページ内文字位置の損失なしカーソルへ変更し、ローカル添付PDFもセッション限定URIで継続取得できるようにしました。
@@ -15,6 +17,7 @@
 
 - ツール内部の8,000文字ページがLLM層で6,000文字へ再切断され、継続カーソルとの間に本文欠落が生じる問題を修正しました。
 - 25ページを超えるPDFの後半が`search_and_fetch`で取得されない問題と、継続ごとに同じ取得ファイルが重複保存される問題を修正しました。
+- 長いPDFを会話をまたいで取得する際、最新の`next_token`だけでソースとカーソルを復元できるようにし、古いトークンや誤った添付IDによって以前のページへ戻る問題を修正しました。
 
 ## [0.5.1] - 2026-08-16
 
@@ -169,7 +172,8 @@
 
 - Web UIのセキュリティヘッダーと表示処理を強化しました。
 
-[Unreleased]: https://github.com/takashi000/ollama-web/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/takashi000/ollama-web/compare/v0.5.2...HEAD
+[0.5.2]: https://github.com/takashi000/ollama-web/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/takashi000/ollama-web/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/takashi000/ollama-web/compare/v0.4.5...v0.5.0
 [0.4.5]: https://github.com/takashi000/ollama-web/compare/v0.4.4...v0.4.5
