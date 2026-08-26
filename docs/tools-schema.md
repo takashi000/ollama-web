@@ -120,13 +120,13 @@ next_token: {token}
 
 | パラメータ | 型 | 必須 | デフォルト | 説明 |
 |------------|----|------|------------|------|
-| `url_or_path` | `str` | ✅ | — | HTTP(S) PDF URL。チャット内では現在のセッションの `attachment:<file_id>` も利用可能。任意のローカルパスは拒否 |
+| `url_or_path` | `str \| None` | 初回のみ | `None` | 初回取得用のHTTP(S) PDF URL。チャット内では現在のセッションの `attachment:<file_id>` も利用可能。`continue_from` 指定時はトークンから復元されるため省略可能。任意のローカルパスは拒否 |
 | `max_chars` | `int \| None` | ❌ | [`settings.fetch_max_chars`](src/ollama_web/config.py:52) (=8000) | 1ページあたりの返却文字数上限 |
-| `continue_from` | `str \| None` | ❌ | `None` | 前回戻り値の `next_token`。指定時は続きページを取得 |
+| `continue_from` | `str \| None` | ❌ | `None` | 同じPDFの直前の戻り値にある `next_token`。PDFソースと次の開始位置を復元して続きページを取得 |
 
 ### 戻り値
 
-`str` — 1ページ分のテキスト、またはエラーメッセージ。続きがある場合は `scrape_url` と同様のページ情報フッターが付与される。
+`str` — 1ページ分のテキスト、またはエラーメッセージ。続きがある場合はページ情報フッターに加え、最新トークンが以前の同一PDF用トークンを置き換えること、上限到達時は最終回答へそのまま残すこと、次回は `continue_from` 単独で再開できることを示すPDF専用メタデータが付与される。このメタデータは会話言語に依存しない固定キーと真偽値で表現し、本文の連結結果には含まれない。
 
 ### 制約
 
@@ -139,10 +139,10 @@ next_token: {token}
 
 ### 処理フロー
 
-1. `continue_from` があればトークンから `(url, page_index, page_char_offset)` を復元
+1. `continue_from` があれば、`url_or_path` の有無や値にかかわらずトークンから `(url, page_index, page_char_offset)` を復元
 2. PDF を全件取得・解析
 3. カーソル位置から、結果全体の上限内で実際に返せる文字数だけ抽出
-4. 未返却文字または残りページがあれば、その直後を指す `next_token` を付与
+4. 未返却文字または残りページがあれば、その直後を指す `next_token` とPDF専用の再開指示を付与
 
 ---
 

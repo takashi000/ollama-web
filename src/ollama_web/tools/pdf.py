@@ -12,6 +12,7 @@ from .helper.pagination import (
     PageSizeError,
     format_page_to_limit,
     make_token,
+    parse_paged_result,
     parse_token,
 )
 from .helper.pdf import extract_pdf_page
@@ -22,6 +23,16 @@ _ATTACHMENT_PREFIX = "attachment:"
 logger = logging.getLogger("ollama_web.tools.pdf")
 
 AttachmentLoader = Callable[[str], bytes | None]
+
+_RESUME_RULE = (
+    "\nresume_tool: pdf_to_text"
+    "\nresume_page_index: {page_index}"
+    "\nresume_page_char_offset: {page_char_offset}"
+    "\nnext_token_is_latest: true"
+    "\nsupersedes_previous_tokens: true"
+    "\nresume_with_continue_from_only: true"
+    "\npreserve_next_token_on_tool_limit: true"
+)
 
 
 def _cursor_value(payload: dict[str, Any], key: str, fallback: int = 0) -> int:
@@ -38,26 +49,32 @@ def _cursor_value(payload: dict[str, Any], key: str, fallback: int = 0) -> int:
 
 
 def _pdf_to_text(
-    url_or_path: str,
+    url_or_path: str | None,
     max_chars: int | None,
     continue_from: str | None,
     attachment_loader: AttachmentLoader | None,
 ) -> str:
-    if not url_or_path or not url_or_path.strip():
-        return "Invalid PDF source."
-
-    src = url_or_path.strip()
+    src = (url_or_path or "").strip()
     page_index = 0
     page_char_offset = 0
     if continue_from:
         try:
             payload = parse_token(continue_from, _TOOL_NAME)
-            src = str(payload.get("url") or src)
+            # A continuation token is self-contained. Its source is
+            # authoritative so a later conversation cannot accidentally pair
+            # the cursor with a stale attachment ID or URL.
+            src = str(payload["url"])
             # Version 1 used offset as the PDF page index.
             page_index = _cursor_value(payload, "page_index", int(payload["offset"]))
             page_char_offset = _cursor_value(payload, "page_char_offset")
         except ValueError as exc:
-            return f"Invalid continuation token: {exc}"
+            return (
+                f"Invalid continuation token: {exc}\n"
+                "restart_from_beginning: false\n"
+                "required_action: reuse_latest_next_token"
+            )
+    elif not src:
+        return "Invalid PDF source."
 
     if src.startswith(_ATTACHMENT_PREFIX):
         file_id = src.removeprefix(_ATTACHMENT_PREFIX)
@@ -98,12 +115,33 @@ def _pdf_to_text(
         )
 
     try:
-        result = format_page_to_limit(
-            page_factory,
-            token_factory,
-            requested_chars=requested,
-            result_limit=settings.max_tool_result_chars,
-        )
+        result_limit = settings.max_tool_result_chars
+        render_limit = result_limit
+        result = ""
+        for _ in range(4):
+            result = format_page_to_limit(
+                page_factory,
+                token_factory,
+                requested_chars=requested,
+                result_limit=render_limit,
+            )
+            _, has_more, next_token = parse_paged_result(result)
+            if not has_more or next_token is None:
+                break
+            next_payload = parse_token(next_token, _TOOL_NAME)
+            resume_metadata = _RESUME_RULE.format(
+                page_index=_cursor_value(next_payload, "page_index", next_payload["offset"]),
+                page_char_offset=_cursor_value(next_payload, "page_char_offset"),
+            )
+            overflow = len(result) + len(resume_metadata) - result_limit
+            if overflow <= 0:
+                result += resume_metadata
+                break
+            render_limit -= overflow + 8
+            if render_limit <= 0:
+                raise PageSizeError("PDF continuation metadata exceeds the result limit.")
+        else:
+            raise PageSizeError("PDF continuation metadata could not fit the result limit.")
     except PageSizeError as exc:
         return f"PDF pagination failed: {exc}"
 
@@ -119,17 +157,21 @@ def _pdf_to_text(
 
 
 def pdf_to_text(
-    url_or_path: str, max_chars: int | None = None, continue_from: str | None = None
+    url_or_path: str | None = None,
+    max_chars: int | None = None,
+    continue_from: str | None = None,
 ) -> str:
     """Extract a losslessly paged PDF from an HTTP(S) URL.
 
     Args:
-      url_or_path: HTTP(S) PDF URL. In chat, a session attachment URI may also
-        be supplied by the attachment context. Arbitrary filesystem paths are
-        never accepted.
+      url_or_path: HTTP(S) PDF URL for the first call. In chat, a session
+        attachment URI may also be supplied by the attachment context.
+        Omit this argument when continue_from is supplied. Arbitrary
+        filesystem paths are never accepted.
       max_chars: Requested maximum source characters for this page. The tool
         may return fewer characters so metadata and its token remain intact.
-      continue_from: Opaque continuation token from the preceding result.
+      continue_from: Opaque, self-contained continuation token from the most
+        recent result for this PDF. It restores both the source and cursor.
     """
     return _pdf_to_text(url_or_path, max_chars, continue_from, None)
 
@@ -138,7 +180,7 @@ def make_session_pdf_tool(attachment_loader: AttachmentLoader) -> Callable[..., 
     """Create a session-scoped ``pdf_to_text`` supporting attachment IDs."""
 
     def session_pdf_to_text(
-        url_or_path: str,
+        url_or_path: str | None = None,
         max_chars: int | None = None,
         continue_from: str | None = None,
     ) -> str:

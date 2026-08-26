@@ -312,6 +312,8 @@ def test_pdf_to_text_continue_from_invalid_token():
 
     result = pdf_to_text("https://example.com/doc.pdf", continue_from="bad-token")
     assert "Invalid continuation token" in result
+    assert "restart_from_beginning: false" in result
+    assert "required_action: reuse_latest_next_token" in result
 
 
 def test_pdf_to_text_rejects_negative_page_character_cursor():
@@ -351,14 +353,65 @@ def test_pdf_to_text_pagination_roundtrip(monkeypatch):
     token = None
     for _ in range(50):
         result = pdf_mod.pdf_to_text(
-            "https://example.com/doc.pdf", max_chars=8000, continue_from=token
+            "https://example.com/doc.pdf" if token is None else "",
+            max_chars=8000,
+            continue_from=token,
         )
         assert len(result) <= 6000
         body_text, has_more, token = parse_paged_result(result)
+        assert "next_token_is_latest:" not in body_text
+        if has_more:
+            assert "resume_tool: pdf_to_text" in result
+            assert "next_token_is_latest: true" in result
+            assert "supersedes_previous_tokens: true" in result
+            assert "resume_with_continue_from_only: true" in result
+            assert "preserve_next_token_on_tool_limit: true" in result
+        else:
+            assert "resume_tool:" not in result
         collected += body_text
         if not has_more:
             break
     assert collected == expected
+
+
+def test_pdf_to_text_continuation_token_source_is_authoritative(monkeypatch):
+    """A continuation restores its URL and does not require url_or_path."""
+    from ollama_web.tools import pdf as pdf_mod
+
+    data = _make_multipage_pdf(["SOURCE-" + "S" * 9000])
+    fetched: list[str] = []
+
+    def fake_fetch(url: str, timeout=None):
+        fetched.append(url)
+        return data, url, "application/pdf"
+
+    monkeypatch.setattr(pdf_mod, "fetch_public_bytes", fake_fetch)
+    first = pdf_mod.pdf_to_text("https://example.com/source.pdf")
+    _, has_more, token = parse_paged_result(first)
+    assert has_more is True
+    assert token is not None
+
+    resumed = pdf_mod.pdf_to_text(continue_from=token)
+    body, _, _ = parse_paged_result(resumed)
+    assert body
+    assert fetched == [
+        "https://example.com/source.pdf",
+        "https://example.com/source.pdf",
+    ]
+
+    # Even a conflicting argument cannot redirect a valid continuation.
+    pdf_mod.pdf_to_text("https://attacker.example/wrong.pdf", continue_from=token)
+    assert fetched[-1] == "https://example.com/source.pdf"
+
+
+def test_pdf_to_text_ollama_schema_allows_token_only_continuation():
+    from ollama._utils import convert_function_to_tool
+
+    from ollama_web.tools.pdf import pdf_to_text
+
+    schema = convert_function_to_tool(pdf_to_text).function.parameters
+    assert "url_or_path" not in (schema.required or [])
+    assert "continue_from" not in (schema.required or [])
 
 
 def test_session_pdf_tool_reads_original_bytes_and_is_session_scoped(tmp_path):
@@ -386,7 +439,10 @@ def test_session_pdf_tool_reads_original_bytes_and_is_session_scoped(tmp_path):
     token = None
     collected = ""
     for _ in range(10):
-        result = tool(f"attachment:{chat_file.id}", continue_from=token)
+        result = tool(
+            f"attachment:{chat_file.id}" if token is None else "",
+            continue_from=token,
+        )
         body, has_more, token = parse_paged_result(result)
         collected += body
         if not has_more:
@@ -491,7 +547,7 @@ def test_attachment_context_keeps_pdf_continuation_and_registry_can_resume(tmp_p
     token = first_result.split("next_token:", 1)[1].splitlines()[0].strip()
     resumed = registry.execute(
         "pdf_to_text",
-        {"url_or_path": f"attachment:{chat_file.id}", "continue_from": token},
+        {"continue_from": token},
     )
     assert "unavailable" not in resumed.lower()
 
