@@ -111,3 +111,95 @@ def test_katex_local_font_assets_are_present() -> None:
 
     assert font_paths
     assert not [path for path in font_paths if not (vendor_dir / path).exists()]
+
+
+def test_authenticated_audio_content_supports_range_requests(
+    workspace_tmp: Path, monkeypatch
+) -> None:
+    client = _client(workspace_tmp, monkeypatch)
+    session = client.app.state.session_store.create()
+    audio = client.app.state.session_store.add_file(
+        session_id=session["id"],
+        name="generated.mp3",
+        data=b"0123456789",
+        mime="audio/mpeg",
+        text="",
+        source="mcp__music__generate",
+    )
+    url = f"/api/sessions/{session['id']}/files/{audio.id}/content"
+
+    assert client.get(url).status_code == 401
+    assert client.post("/api/auth/login", json={"pin": "123456"}).status_code == 200
+    response = client.get(url, headers={"Range": "bytes=2-5"})
+
+    assert response.status_code == 206
+    assert response.content == b"2345"
+    assert response.headers["content-type"] == "audio/mpeg"
+    assert response.headers["content-range"] == "bytes 2-5/10"
+    assert response.headers["cache-control"] == "private, no-store"
+    assert response.headers["x-content-type-options"] == "nosniff"
+    assert "media-src 'self'" in response.headers["content-security-policy"]
+
+
+def test_file_content_does_not_inline_non_media(workspace_tmp: Path, monkeypatch) -> None:
+    client = _client(workspace_tmp, monkeypatch)
+    session = client.app.state.session_store.create()
+    text_file = client.app.state.session_store.add_file(
+        session_id=session["id"],
+        name="notes.html",
+        data=b"<script>alert(1)</script>",
+        mime="text/html",
+        text="",
+    )
+    client.post("/api/auth/login", json={"pin": "123456"})
+
+    response = client.get(f"/api/sessions/{session['id']}/files/{text_file.id}/content")
+    assert response.status_code == 415
+
+    disguised_html = client.app.state.session_store.add_file(
+        session_id=session["id"],
+        name="disguised.png",
+        data=b"<script>alert(1)</script>",
+        mime="text/html",
+        text="",
+    )
+    response = client.get(
+        f"/api/sessions/{session['id']}/files/{disguised_html.id}/content"
+    )
+    assert response.status_code == 415
+
+
+def test_uploaded_audio_is_playable_but_excluded_from_attachment_text(
+    workspace_tmp: Path, monkeypatch
+) -> None:
+    from ollama_web.routes.chat import _attachment_context, _has_audio_attachments
+
+    client = _client(workspace_tmp, monkeypatch)
+    login = client.post("/api/auth/login", json={"pin": "123456"})
+    csrf = login.headers["x-csrf-token"]
+    session = client.app.state.session_store.create()
+    response = client.post(
+        f"/api/sessions/{session['id']}/files",
+        headers={"X-CSRF-Token": csrf},
+        files={"files": ("recording.mp3", b"audio-bytes", "audio/mpeg")},
+    )
+
+    assert response.status_code == 200
+    audio = response.json()["files"][0]
+    assert audio["text"] == ""
+    assert _has_audio_attachments(
+        client.app.state.session_store, session["id"], [audio["id"]]
+    )
+    assert (
+        _attachment_context(
+            client.app.state.session_store,
+            session["id"],
+            [audio["id"]],
+            total_limit=4000,
+            language="ja",
+        )
+        == ""
+    )
+    playable = client.get(f"/api/sessions/{session['id']}/files/{audio['id']}/content")
+    assert playable.status_code == 200
+    assert playable.content == b"audio-bytes"

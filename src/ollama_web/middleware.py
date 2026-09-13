@@ -25,6 +25,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
                 "script-src 'self'; "
                 "connect-src 'self'; "
                 "img-src 'self' data: blob:; "
+                "media-src 'self'; "
                 "style-src 'self' 'unsafe-inline'; "
                 "font-src 'self'; "
                 "base-uri 'self'; "

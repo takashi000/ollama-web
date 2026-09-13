@@ -170,6 +170,10 @@ Server 名と Tool 名には英数字、`_`、`-` のみ使えます。`__` は�
 
 MCP 設定 API の GET 応答では、`env` / `headers` 内の secret らしい値は `***` にマスクされます。Tool の実行結果やエラーも LLM へ渡す前に不信データとして隔離されます。
 
+MCP Tool が画像または音声を返した場合、base64 はテキスト結果から分離し、サイズと MIME type を検証してセッションへ保存します。画像は vision 対応が明示されたモデルにだけ入力し、非対応モデルには多言語プロンプトで固定の通知を渡します。音声データはモデルの capability にかかわらず Ollama へ渡さず、チャット上の同一オリジン URL から `<audio controls>` で再生します。MCP の `annotations.audience` も反映されます。
+
+標準の `web_search`、`scrape_url`、`search_and_fetch` はテキスト取得専用です。検索結果の画像 URL を自動取得せず、後二者は画像・音声・動画のレスポンスを拒否します。詳しい境界と理由は [マルチメディア処理の設計](docs/multimedia.md) を参照してください。
+
 `scripts/` 以下には動作確認用の MCP サーバーが用意されています。
 
 ```bash

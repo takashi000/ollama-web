@@ -32,7 +32,8 @@
     "processing": "Processing…",
     "no_response": "(No response)",
     "clear_failed": "Failed to clear",
-    "clear_messages_failed": "Failed to clear messages"
+    "clear_messages_failed": "Failed to clear messages",
+    "image_attachment": "Attached image"
   },
   "mcp": {
     "server_settings": "MCP Server Settings",

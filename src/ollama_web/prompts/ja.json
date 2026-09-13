@@ -5,6 +5,10 @@
   "pagination_incomplete_instruction": "ページングされた資料に未取得部分があります。取得済み範囲だけを根拠に回答し、全文を確認したとは述べないでください。",
   "attachment_prefix": "以下はユーザーが添付したファイルの内容です：",
   "attachment_paging": "PDFは先頭プレビューです。has_more: true の場合、attached-file の uri と next_token を pdf_to_text に渡し、必要な範囲を続けて取得してください。未取得部分が残る場合は全文を読んだと主張しないでください。",
+  "vision_unsupported_attachment": "ユーザーは画像を添付しましたが、現在選択されているモデルは画像入力に対応していません。画像の内容はモデルへ提供されていません。必要に応じて、この制限をユーザーへ説明してください。",
+  "audio_unsupported_attachment": "ユーザーは音声を添付しました。音声データそのものはモデルへ提供されていません。必要に応じて、この制限をユーザーへ説明してください。",
+  "mcp_image_artifact_notice": "MCPツールは画像を生成しましたが、現在のモデルは画像入力に対応していないため、画像の内容はモデルへ提供されていません。",
+  "mcp_audio_artifact_notice": "MCPツールは音声を生成しました。音声データそのものはモデルへ提供されていません。",
   "fetch": {
     "candidate": "候補",
     "title": "タイトル",

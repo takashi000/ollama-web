@@ -2,11 +2,20 @@
 
 from __future__ import annotations
 
+import asyncio
+import base64
 import sys
 import tempfile
 from pathlib import Path
 
 import pytest
+from mcp.types import (
+    AudioContent,
+    BlobResourceContents,
+    CallToolResult,
+    EmbeddedResource,
+    ImageContent,
+)
 from starlette.testclient import TestClient
 
 from ollama_web.app import create_app
@@ -15,10 +24,13 @@ from ollama_web.mcp import (
     _clean_schema,
     _normalized_tool_name,
     _parse_tool_name,
+    _parse_tool_result,
     load_mcp_config,
+    make_mcp_executor,
     save_mcp_config,
 )
-from ollama_web.tools.registry import ToolRegistry
+from ollama_web.sessions import SessionStore
+from ollama_web.tools.registry import ToolArtifact, ToolExecutionResult, ToolRegistry
 
 
 @pytest.fixture
@@ -146,3 +158,145 @@ def test_tool_registry_mcp_tool():
     assert len(reg.ollama_tools) == 1
     result = reg.execute("mcp__s__t", {})
     assert result == "ok"
+
+
+def test_mcp_image_and_audio_are_preserved_as_artifacts_not_text():
+    image_data = b"png-bytes"
+    audio_data = b"mp3-bytes"
+    result = CallToolResult(
+        content=[
+            ImageContent(
+                type="image",
+                data=base64.b64encode(image_data).decode("ascii"),
+                mimeType="image/png",
+            ),
+            AudioContent(
+                type="audio",
+                data=base64.b64encode(audio_data).decode("ascii"),
+                mimeType="audio/mpeg",
+            ),
+        ]
+    )
+
+    parsed = _parse_tool_result(result, tool_name="generate")
+
+    assert [artifact.kind for artifact in parsed.artifacts] == ["image", "audio"]
+    assert parsed.artifacts[0].data == image_data
+    assert parsed.artifacts[1].data == audio_data
+    assert base64.b64encode(image_data).decode("ascii") not in parsed.text
+    assert base64.b64encode(audio_data).decode("ascii") not in parsed.text
+
+
+def test_mcp_blob_resource_does_not_leak_base64_into_text():
+    encoded = base64.b64encode(b"audio-bytes").decode("ascii")
+    result = CallToolResult(
+        content=[
+            EmbeddedResource(
+                type="resource",
+                resource=BlobResourceContents(
+                    uri="file:///generated.mp3",
+                    mimeType="audio/mpeg",
+                    blob=encoded,
+                ),
+            )
+        ]
+    )
+
+    parsed = _parse_tool_result(result, tool_name="music")
+
+    assert len(parsed.artifacts) == 1
+    assert parsed.artifacts[0].kind == "audio"
+    assert encoded not in parsed.text
+
+
+def test_mcp_artifact_audience_is_preserved():
+    encoded = base64.b64encode(b"image-bytes").decode("ascii")
+    parsed = _parse_tool_result(
+        {
+            "content": [
+                {
+                    "type": "image",
+                    "data": encoded,
+                    "mimeType": "image/png",
+                    "annotations": {"audience": ["assistant"]},
+                }
+            ]
+        }
+    )
+
+    assert len(parsed.artifacts) == 1
+    assert parsed.artifacts[0].for_user is False
+    assert parsed.artifacts[0].for_assistant is True
+
+
+def test_mcp_executor_runs_artifact_handler_without_flattening(monkeypatch):
+    from ollama_web import mcp as mcp_mod
+
+    artifact = ToolArtifact(
+        kind="audio",
+        mime="audio/mpeg",
+        name="music.mp3",
+        data=b"audio",
+    )
+    detailed = ToolExecutionResult("result text", [artifact])
+    monkeypatch.setattr(mcp_mod, "call_mcp_tool_sync", lambda *_args, **_kwargs: detailed)
+    seen = []
+    executor = make_mcp_executor(
+        {"mcpServers": {}},
+        artifact_handler=lambda name, item: seen.append((name, item)),
+    )
+
+    returned = executor("mcp__music__generate", {})
+
+    assert returned is detailed
+    assert seen == [("mcp__music__generate", artifact)]
+
+
+def test_chat_registry_persists_only_user_visible_mcp_artifacts(tmp_path, monkeypatch):
+    from ollama_web.routes import chat as chat_route
+
+    tool_name = "mcp__music__generate"
+    tool_definition = {
+        "type": "function",
+        "function": {
+            "name": tool_name,
+            "parameters": {"type": "object", "properties": {}},
+        },
+    }
+
+    async def fake_collect():
+        return [tool_definition]
+
+    artifacts = [
+        ToolArtifact("audio", "audio/mpeg", "public.mp3", b"public"),
+        ToolArtifact(
+            "image",
+            "image/png",
+            "assistant-only.png",
+            b"private",
+            for_user=False,
+        ),
+    ]
+
+    def fake_make_executor(*, artifact_handler=None):
+        def executor(full_name, arguments=""):
+            assert full_name == tool_name
+            for artifact in artifacts:
+                artifact_handler(tool_name, artifact)
+            return ToolExecutionResult("done", artifacts)
+
+        return executor
+
+    monkeypatch.setattr(chat_route, "collect_mcp_tools", fake_collect)
+    monkeypatch.setattr(chat_route, "make_mcp_executor", fake_make_executor)
+    store = SessionStore(tmp_path)
+    session = store.create()
+
+    registry = asyncio.run(chat_route._build_registry(session["id"], store))
+    result = registry.execute_detailed(tool_name, {})
+    saved = store.get(session["id"])["files"]
+
+    assert result.artifacts[0].file_id is not None
+    assert result.artifacts[1].file_id is None
+    assert [item["name"] for item in saved] == ["public.mp3"]
+    assert saved[0]["source"] == tool_name

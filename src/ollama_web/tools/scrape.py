@@ -80,6 +80,10 @@ def scrape_url(url: str, max_chars: int | None = None, continue_from: str | None
     except Exception as exc:  # noqa: BLE001
         return f"Failed to fetch {url}: {exc}"
 
+    media_type = content_type.split(";", 1)[0].strip().lower()
+    if media_type.startswith(("image/", "audio/", "video/")):
+        return f"Unsupported content type for text scraping: {media_type}."
+
     cleaned = extract_readable_text(data, content_type)
 
     if not cleaned:

@@ -5,6 +5,10 @@
   "pagination_incomplete_instruction": "A paged source still has unread content. Answer only from the retrieved portion and do not claim that the full source was reviewed.",
   "attachment_prefix": "The following is the content of files attached by the user:",
   "attachment_paging": "A PDF body is an initial preview. When has_more is true, pass the attached-file uri and next_token to pdf_to_text for the needed continuation. Do not claim to have read the full file while unread content remains.",
+  "vision_unsupported_attachment": "The user attached an image, but the currently selected model does not support image input. The image contents were not provided to the model. Explain this limitation to the user when relevant.",
+  "audio_unsupported_attachment": "The user attached audio. The audio data itself was not provided to the model. Explain this limitation to the user when relevant.",
+  "mcp_image_artifact_notice": "The MCP tool generated an image, but the current model does not support image input, so the image contents were not provided to the model.",
+  "mcp_audio_artifact_notice": "The MCP tool generated audio. The audio data itself was not provided to the model.",
   "fetch": {
     "candidate": "Candidate",
     "title": "Title",

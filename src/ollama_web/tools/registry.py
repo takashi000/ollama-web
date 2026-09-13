@@ -14,6 +14,37 @@ from .search import web_search
 
 
 @dataclass
+class ToolArtifact:
+    """Binary output produced by a tool, kept outside its text result."""
+
+    kind: str
+    mime: str
+    name: str
+    data: bytes
+    file_id: str | None = None
+    for_user: bool = True
+    for_assistant: bool = True
+
+    def public_dict(self) -> dict[str, Any]:
+        """Return browser-safe metadata without the binary payload."""
+        return {
+            "id": self.file_id,
+            "kind": self.kind,
+            "mime": self.mime,
+            "name": self.name,
+            "size": len(self.data),
+        }
+
+
+@dataclass
+class ToolExecutionResult:
+    """A tool's LLM-facing text and separately handled binary artifacts."""
+
+    text: str
+    artifacts: list[ToolArtifact] = field(default_factory=list)
+
+
+@dataclass
 class ToolRegistry:
     """A simple registry mapping tool names to callable implementations."""
 
@@ -75,6 +106,20 @@ class ToolRegistry:
     def get(self, name: str) -> Callable[..., object] | None:
         return self._tools.get(name)
 
+    def execute_detailed(
+        self, name: str, arguments: dict[str, object] | str
+    ) -> ToolExecutionResult:
+        """Execute a tool while preserving any binary artifacts separately."""
+        result = self._execute_raw(name, arguments)
+        if isinstance(result, ToolExecutionResult):
+            return result
+        if isinstance(result, str):
+            return ToolExecutionResult(result)
+        try:
+            return ToolExecutionResult(json.dumps(result, ensure_ascii=False, default=str))
+        except (TypeError, ValueError):
+            return ToolExecutionResult(str(result))
+
     def execute(self, name: str, arguments: dict[str, object] | str) -> str:
         """Execute a named tool and return a JSON-encoded string result.
 
@@ -87,6 +132,10 @@ class ToolRegistry:
           A JSON string representation of the tool's return value, or an error
           object when the tool is unknown or raises.
         """
+        return self.execute_detailed(name, arguments).text
+
+    def _execute_raw(self, name: str, arguments: dict[str, object] | str) -> object:
+        """Execute a named tool without flattening a structured result."""
         func = self.get(name)
         if func is None:
             return json.dumps({"error": f"Unknown tool: {name}"})
@@ -106,12 +155,7 @@ class ToolRegistry:
         except Exception as exc:  # noqa: BLE001
             return json.dumps({"error": f"{type(exc).__name__}: {exc}"})
 
-        if isinstance(result, str):
-            return result
-        try:
-            return json.dumps(result, ensure_ascii=False, default=str)
-        except (TypeError, ValueError):
-            return str(result)
+        return result
 
 
 def default_registry() -> ToolRegistry:

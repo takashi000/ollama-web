@@ -24,7 +24,7 @@ from ..settings_store import load_app_settings
 from ..tools.fetch import pop_fetched_files
 from ..tools.helper.image import resize_image
 from ..tools.pdf import make_session_pdf_tool
-from ..tools.registry import ToolRegistry, default_registry
+from ..tools.registry import ToolArtifact, ToolRegistry, default_registry
 
 logger = logging.getLogger("ollama_web.chat")
 
@@ -107,7 +107,25 @@ async def _build_registry(
     logger.info("collected %d MCP tool(s): %s", len(mcp_tools), tool_names)
 
     if mcp_tools:
-        executor = make_mcp_executor()
+        artifact_handler = None
+        if session_id is not None and store is not None:
+
+            def persist_artifact(full_name: str, artifact: ToolArtifact) -> None:
+                if not artifact.for_user:
+                    return
+                chat_file = store.add_file(
+                    session_id=session_id,
+                    name=artifact.name,
+                    data=artifact.data,
+                    mime=artifact.mime,
+                    text="",
+                    source=full_name,
+                )
+                artifact.file_id = chat_file.id
+
+            artifact_handler = persist_artifact
+
+        executor = make_mcp_executor(artifact_handler=artifact_handler)
         for tool_def in mcp_tools:
             fn = tool_def.get("function", {})
             name = fn.get("name")
@@ -127,21 +145,23 @@ def _attachment_context(
     file_ids: list[str],
     *,
     total_limit: int,
+    language: str | None = None,
 ) -> str:
     if total_limit <= 0:
         return ""
     chat_files = []
     for file_id in file_ids:
         chat_file = store.get_file(session_id, file_id)
-        if chat_file is not None and not chat_file.is_image:
+        if chat_file is not None and not chat_file.is_image and not chat_file.is_audio:
             chat_files.append(chat_file)
     if not chat_files:
         return ""
 
     parts: list[str] = []
-    prefix = get_prompt("attachment_prefix")
+    prefix = get_prompt("attachment_prefix", lang=language)
     paging_hint = get_prompt(
         "attachment_paging",
+        lang=language,
         fallback=(
             "PDF previews may have unread content. Use pdf_to_text with the attachment URI "
             "and next_token until has_more is absent."
@@ -150,9 +170,11 @@ def _attachment_context(
     used = len(prefix) + len(paging_hint) + 4
     per_file = max(256, min(4000, (total_limit - used) // max(1, len(chat_files))))
     pdf_tool = make_session_pdf_tool(
-        lambda file_id: store.get_file_data(session_id, file_id)
-        if store.get_file(session_id, file_id) is not None
-        else None
+        lambda file_id: (
+            store.get_file_data(session_id, file_id)
+            if store.get_file(session_id, file_id) is not None
+            else None
+        )
     )
 
     for chat_file in chat_files:
@@ -172,6 +194,20 @@ def _attachment_context(
     if not parts:
         return ""
     return "\n\n".join([prefix, paging_hint, *parts])
+
+
+def _has_image_attachments(store: SessionStore, session_id: str, file_ids: list[str]) -> bool:
+    return any(
+        (chat_file := store.get_file(session_id, file_id)) is not None and chat_file.is_image
+        for file_id in file_ids
+    )
+
+
+def _has_audio_attachments(store: SessionStore, session_id: str, file_ids: list[str]) -> bool:
+    return any(
+        (chat_file := store.get_file(session_id, file_id)) is not None and chat_file.is_audio
+        for file_id in file_ids
+    )
 
 
 def _collect_images(store: SessionStore, session_id: str, file_ids: list[str]) -> list[bytes]:
@@ -251,6 +287,7 @@ async def _chat_event_stream(
     ]
     user_content = ""
     assistant_text = ""
+    assistant_file_ids: list[str] = []
     last_done_event: dict[str, Any] | None = None
 
     try:
@@ -260,13 +297,36 @@ async def _chat_event_stream(
             if session is not None:
                 session_messages = _parse_messages(session.get("messages", []))
 
-        raw_messages = payload.get("messages", [])
+        raw_messages = list(payload.get("messages", []))
         if raw_messages:
             user_content = _limit_text(
                 str(raw_messages[-1].get("content", "") or ""),
                 request.app.state.settings.max_message_chars,
             )
             raw_messages[-1]["content"] = user_content
+
+        # An attachment-only submission still needs a user message to carry
+        # either image bytes or the localized unsupported-vision notice.
+        if file_ids and not raw_messages:
+            raw_messages.append({"role": "user", "content": ""})
+
+        host = request.app.state.settings.ollama_host
+
+        from ollama_web import llm  # local import to avoid circular at module load
+
+        capabilities = llm.get_model_capabilities(model, host=host)
+        logger.info(
+            "chat stream model=%s capabilities=%s",
+            model,
+            sorted(capabilities),
+        )
+
+        # Fallback: some cloud/proxy models support tools even though ollama
+        # does not advertise the capability. Enable only tools; vision remains
+        # opt-in because sending image bytes to an unknown model is not safe.
+        if "tools" not in capabilities and ":cloud" in model:
+            capabilities.add("tools")
+            logger.info("enabled tools capability fallback for cloud model %s", model)
 
         attachment_ctx = ""
         if session_id and file_ids:
@@ -279,6 +339,7 @@ async def _chat_event_stream(
                 session_id,
                 file_ids,
                 total_limit=attachment_budget,
+                language=language,
             )
 
         if attachment_ctx and user_content:
@@ -289,11 +350,22 @@ async def _chat_event_stream(
         elif attachment_ctx:
             raw_messages.append({"role": "user", "content": attachment_ctx})
 
-        # Attach image bytes to the latest user message per ollama spec.
+        # Attach image bytes only when Ollama explicitly advertises vision.
+        # Other models receive a localized fixed notice, never base64 text.
         if session_id and file_ids and raw_messages:
-            images = _collect_images(store, session_id, file_ids)
-            if images:
-                raw_messages[-1]["images"] = images
+            notices: list[str] = []
+            if _has_image_attachments(store, session_id, file_ids):
+                if "vision" in capabilities:
+                    images = _collect_images(store, session_id, file_ids)
+                    if images:
+                        raw_messages[-1]["images"] = images
+                else:
+                    notices.append(get_prompt("vision_unsupported_attachment", lang=language))
+            if _has_audio_attachments(store, session_id, file_ids):
+                notices.append(get_prompt("audio_unsupported_attachment", lang=language))
+            if notices:
+                current = str(raw_messages[-1].get("content", "") or "")
+                raw_messages[-1]["content"] = f"{current}\n\n" + "\n\n".join(notices)
 
         messages = _parse_messages(raw_messages)
         if session_messages:
@@ -304,10 +376,6 @@ async def _chat_event_stream(
         # a system message.
         if not any(getattr(m, "role", None) == "system" for m in messages):
             messages.insert(0, Message(role="system", content=system_prompt))
-
-        host = request.app.state.settings.ollama_host
-
-        from ollama_web import llm  # local import to avoid circular at module load
 
         registry = await _build_registry(session_id, store)
 
@@ -322,20 +390,6 @@ async def _chat_event_stream(
             len(getattr(messages[-1], "images", []) or []),
             total_image_bytes,
         )
-
-        capabilities = llm.get_model_capabilities(model, host=host)
-        logger.info(
-            "chat stream model=%s capabilities=%s",
-            model,
-            sorted(capabilities),
-        )
-
-        # Fallback: some cloud/proxy models support tools even though ollama
-        # does not advertise the capability. Enable tools when the model name
-        # hints at a cloud endpoint and tools are not already reported.
-        if "tools" not in capabilities and ":cloud" in model:
-            capabilities.add("tools")
-            logger.info("enabled tools capability fallback for cloud model %s", model)
 
         async for event in llm.astream_chat_with_tools(
             messages,
@@ -355,6 +409,11 @@ async def _chat_event_stream(
             if event.get("type") == "done":
                 event["num_ctx"] = num_ctx
                 last_done_event = event
+            if event.get("type") == "tool_end":
+                for media in event.get("media", []):
+                    file_id = str(media.get("id", ""))
+                    if is_valid_id(file_id) and file_id not in assistant_file_ids:
+                        assistant_file_ids.append(file_id)
             yield event
 
     except Exception as exc:  # noqa: BLE001
@@ -370,19 +429,20 @@ async def _chat_event_stream(
     finally:
         # Persist user and assistant messages to the session even when the
         # upstream call failed, so the UI keeps the user message.
-        if session_id and user_content:
+        if session_id and (user_content or file_ids):
             store.add_message(
                 session_id=session_id,
                 role="user",
                 content=user_content,
                 attachments=file_ids,
             )
-            if assistant_text:
+            if assistant_text or assistant_file_ids:
                 token_count = _token_count_from_done(last_done_event, num_ctx)
                 store.add_message(
                     session_id=session_id,
                     role="assistant",
                     content=assistant_text,
+                    attachments=assistant_file_ids,
                     token_count=token_count,
                 )
 

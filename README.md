@@ -170,6 +170,10 @@ Server names and tool names may only contain alphanumeric characters, `_`, and `
 
 In GET responses from the MCP settings API, secret-like values in `env` / `headers` are masked as `***`. Tool execution results and errors are also quarantined as untrusted data before being passed to the LLM.
 
+When an MCP tool returns an image or audio item, its base64 payload is separated from the text result, checked against size and MIME allowlists, and stored in the session. Images are sent only to models that explicitly advertise vision support; other models receive a fixed localized notice. Audio bytes are never sent to Ollama, regardless of model capabilities, and are played in the chat through a same-origin URL and an `<audio controls>` element. MCP `annotations.audience` is honored.
+
+The built-in `web_search`, `scrape_url`, and `search_and_fetch` tools are text-only. Search results do not trigger image downloads, and the latter two tools reject image, audio, and video responses. See [Multimedia processing design](docs/multimedia.md) for the boundaries and rationale.
+
 Example MCP servers for testing are provided under `scripts/`.
 
 ```bash

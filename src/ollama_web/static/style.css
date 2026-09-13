@@ -501,6 +501,32 @@ main#chat {
   border-style: dashed;
 }
 
+.message-media {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.message-media img {
+  display: block;
+  max-width: min(100%, 640px);
+  max-height: 520px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  object-fit: contain;
+}
+
+.message-media audio {
+  display: block;
+  width: min(100%, 640px);
+}
+
+.message-media .media-label {
+  color: var(--muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
 .message .extras details.thinking {
   background: var(--think-bg);
 }

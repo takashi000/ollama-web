@@ -80,7 +80,7 @@ def store_fetched_file(
                 "mime": mime,
                 "text": text,
                 "url": url,
-            }
+            },
         )
 
 
@@ -91,7 +91,7 @@ def pop_fetched_files(session_id: str) -> list[_FetchedFile]:
 
 def _normalize_file_type(file_type: str) -> str:
     ft = file_type.strip().lower().lstrip(".")
-    return _FILETYPE_SUFFIXES.get(ft, ft)
+    return _FILETYPE_SUFFIXES.get(ft, "")
 
 
 def _filetype_query(query: str, file_type: str) -> str:
@@ -117,9 +117,9 @@ def _guess_mime(name: str, file_type: str) -> str:
     return mime or f"application/{file_type}"
 
 
-def _fetch_bytes(url: str) -> bytes:
-    data, _, _ = fetch_public_bytes(url, timeout=settings.scrape_timeout)
-    return data
+def _fetch_bytes(url: str) -> tuple[bytes, str]:
+    data, _, content_type = fetch_public_bytes(url, timeout=settings.scrape_timeout)
+    return data, content_type
 
 
 def _full_text_for_file(url: str, data: bytes, file_type: str) -> str:
@@ -212,9 +212,7 @@ def search_and_fetch(
         except (TypeError, ValueError) as exc:
             return f"Invalid continuation token: cursor is not an integer: {exc}"
         legacy_pdf_offset = (
-            file_offset
-            if payload.get("v") == 1 and "pdf_page_index" not in payload
-            else None
+            file_offset if payload.get("v") == 1 and "pdf_page_index" not in payload else None
         )
         if min(file_idx, file_offset, pdf_page_index, pdf_page_char_offset) < 0:
             return "Invalid continuation token: cursor values must not be negative."
@@ -293,7 +291,10 @@ def _render_file_page(
     p = get_prompts().get("fetch", {})
 
     try:
-        data = _fetch_bytes(url)
+        data, content_type = _fetch_bytes(url)
+        media_type = content_type.split(";", 1)[0].strip().lower()
+        if media_type.startswith(("image/", "audio/", "video/")):
+            raise ValueError(f"unsupported media content type: {media_type}")
     except Exception as exc:  # noqa: BLE001
         # On fetch failure, advance to the next candidate rather than aborting
         # the whole pagination chain.
@@ -439,9 +440,7 @@ def _render_file_page(
         return f"File pagination failed: {exc}"
 
 
-def _make_fetch_token(
-    matched: list[dict[str, str]], cursor: dict[str, int], file_type: str
-) -> str:
+def _make_fetch_token(matched: list[dict[str, str]], cursor: dict[str, int], file_type: str) -> str:
     file_idx = cursor["file_idx"]
     url = matched[file_idx].get("href", "") if file_idx < len(matched) else "completed"
     return make_token(

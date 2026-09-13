@@ -7,6 +7,19 @@
 
 ## [Unreleased]
 
+### Added
+
+- MCP の画像・音声結果をセッションへ保存し、認証済みの同一オリジン URL からチャット上で表示・再生できるようにしました。
+
+### Changed
+
+- 画像は vision 対応モデルだけへ渡し、非対応時は多言語の固定通知へ置き換えるようにしました。MCP 音声データはモデル capability にかかわらず Ollama へ渡しません。
+- `web_search`、`scrape_url`、`search_and_fetch` をテキスト専用の契約に統一し、後二者は画像・音声・動画レスポンスを拒否するようにしました。
+
+### Security
+
+- MCP の base64 メディアをテキスト結果から分離し、MIME type・件数・サイズを制限しました。メディア配信は認証、セッションスコープ、MIME allowlist、`media-src 'self'` を適用します。
+
 ## [0.5.2] - 2026-08-26
 
 ### Changed

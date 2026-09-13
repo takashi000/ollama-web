@@ -25,6 +25,8 @@ ollama-web は LLM（Ollama）にツール呼び出し（function calling）機�
 
 `scrape_url` / `pdf_to_text` / `search_and_fetch` は**損失なしページング（継続トークン方式）に対応**しています。本文・メタデータ・継続トークンを含む結果全体をLLM側の上限内に収めてからカーソルを確定します。`web_search` はページング対象外です。
 
+標準ツールはすべてテキスト専用です。`web_search` は検索結果の文字列メタデータだけを返し、リンク先の画像を取得しません。`scrape_url` と `search_and_fetch` は HTTP 応答の `Content-Type` が `image/*`、`audio/*`、`video/*` の場合に拒否します。これは CSP の代替ではなく、ツール契約を揃え、バイナリを誤ってテキスト化して LLM へ渡さないためのサーバー側境界です。
+
 ## ツール一覧
 
 | ツール名 | 実装ファイル | 概要 | ページング対応 |
@@ -106,6 +108,7 @@ next_token: {token}
 ### 設計上の注意点
 
 - 不正URL/ブロックURLは `Blocked URL: ...`、取得失敗は `Failed to fetch ...` のエラー文字列を返す。
+- 画像・音声・動画の `Content-Type` はテキスト抽出せず拒否する。
 - 不正な `continue_from` トークンは `Invalid continuation token: ...` エラーを返す。
 - 全文を一度解析してメモリに保持する（`max_fetch_mb`=10MB 上限があるため実用上問題ない範囲）。
 
@@ -156,7 +159,7 @@ next_token: {token}
 | パラメータ | 型 | 必須 | デフォルト | 説明 |
 |------------|----|------|------------|------|
 | `query` | `str` | ✅ | — | 検索キーワード。空文字列は `fetch.empty_query` プロンプトを返す |
-| `file_type` | `str` | ✅ | — | ファイル拡張子（`pdf`/`csv`/`txt`/`md`/`json`/`html`/`htm`/`xml`/`py`/`js`/`ts` 等）。空文字列は `fetch.invalid_type` プロンプトを返す |
+| `file_type` | `str` | ✅ | — | 許可されたファイル拡張子（`pdf`/`csv`/`txt`/`md`/`json`/`html`/`htm`/`xml`/`py`/`js`/`ts`）。空文字列または許可外の値は `fetch.invalid_type` プロンプトを返す |
 | `max_results` | `int \| None` | ❌ | [`settings.fetch_max_results`](src/ollama_web/config.py:51) (=3) | 取得候補URL数上限。`fetch_max_results` でキャップ |
 | `max_chars` | `int \| None` | ❌ | [`settings.fetch_max_chars`](src/ollama_web/config.py:52) (=8000) | ファイルごとの1ページあたりの返却文字数上限 |
 | `session_id` | `str \| None` | ❌ | `None` | 指定時、取得ファイルをセッションに永続化するためのキューに格納 |

@@ -32,7 +32,8 @@
     "processing": "処理中…",
     "no_response": "（応答なし）",
     "clear_failed": "クリアに失敗しました",
-    "clear_messages_failed": "メッセージのクリアに失敗しました"
+    "clear_messages_failed": "メッセージのクリアに失敗しました",
+    "image_attachment": "添付画像"
   },
   "mcp": {
     "server_settings": "MCPサーバー設定",

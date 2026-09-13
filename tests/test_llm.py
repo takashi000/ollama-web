@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import base64
 from types import SimpleNamespace
 from typing import Any
 
@@ -11,12 +10,12 @@ from ollama import Message
 from ollama._types import Image as OllamaImage
 
 from ollama_web.llm import (
-    _embed_images_in_content,
     _is_image_message,
+    _remove_images_with_notice,
     _token_counts,
     stream_chat_with_tools,
 )
-from ollama_web.tools.registry import ToolRegistry
+from ollama_web.tools.registry import ToolArtifact, ToolExecutionResult, ToolRegistry
 
 
 def _image_message() -> Message:
@@ -35,11 +34,11 @@ def test_is_image_message_without_images() -> None:
     assert _is_image_message(Message(role="user", content="hello")) is False
 
 
-def test_embed_images_in_content_adds_base64_markdown() -> None:
-    embedded = _embed_images_in_content(_image_message())
-    encoded = base64.b64encode(b"fake-image-bytes").decode("ascii")
-    assert f"![image](data:image/png;base64,{encoded})" in embedded.content
-    assert not getattr(embedded, "images", None)
+def test_remove_images_adds_localized_notice_without_base64() -> None:
+    converted = _remove_images_with_notice(_image_message(), "ja")
+    assert "画像入力に対応していません" in str(converted.content)
+    assert "ZmFrZS1pbWFnZS1ieXRlcw" not in str(converted.content)
+    assert not getattr(converted, "images", None)
 
 
 def test_stream_chat_with_tools_disables_unsupported_capabilities(
@@ -80,6 +79,168 @@ def test_stream_chat_with_tools_disables_unsupported_capabilities(
     assert client.calls[0]["think"] is None
     assert client.calls[0]["stream"] is True
     assert events[-1] == {"type": "done"}
+
+
+@pytest.mark.parametrize(
+    ("capabilities", "expect_images", "notice"),
+    [
+        ({"tools", "vision"}, True, None),
+        ({"tools"}, False, "画像の内容はモデルへ提供されていません"),
+    ],
+)
+def test_mcp_image_is_only_sent_to_vision_models(
+    monkeypatch: pytest.MonkeyPatch,
+    capabilities: set[str],
+    expect_images: bool,
+    notice: str | None,
+) -> None:
+    from ollama_web import llm
+
+    registry = ToolRegistry()
+
+    def executor(full_name: str, arguments: dict[str, object]) -> ToolExecutionResult:
+        return ToolExecutionResult(
+            text="tool text",
+            artifacts=[
+                ToolArtifact(
+                    kind="image",
+                    mime="image/png",
+                    name="generated.png",
+                    data=b"fake-image-bytes",
+                    file_id="a" * 32,
+                )
+            ],
+        )
+
+    registry.register_mcp_tool(
+        "mcp__test__image",
+        {"type": "function", "function": {"name": "mcp__test__image"}},
+        executor,
+    )
+
+    class FakeClient:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, Any]] = []
+
+        def chat(self, **kwargs: Any) -> list[SimpleNamespace]:
+            self.calls.append(kwargs)
+            if len(self.calls) == 1:
+                return [
+                    SimpleNamespace(
+                        message={
+                            "content": "",
+                            "tool_calls": [
+                                {
+                                    "function": {
+                                        "name": "mcp__test__image",
+                                        "arguments": {},
+                                    }
+                                }
+                            ],
+                        }
+                    )
+                ]
+            return [SimpleNamespace(message={"content": "done"})]
+
+    client = FakeClient()
+    monkeypatch.setattr(llm, "get_client", lambda _host=None: client)
+    monkeypatch.setattr(llm, "resize_image", lambda data, name="": data)
+
+    events = list(
+        llm.stream_chat_with_tools(
+            [Message(role="user", content="generate")],
+            model="test-model",
+            registry=registry,
+            capabilities=capabilities,
+            language="ja",
+        )
+    )
+
+    tool_message = next(
+        message
+        for message in reversed(client.calls[1]["messages"])
+        if getattr(message, "role", None) == "tool"
+    )
+    assert bool(getattr(tool_message, "images", None)) is expect_images
+    if notice is not None:
+        assert notice in str(tool_message.content)
+    assert any(
+        event.get("media", [{}])[0].get("id") == "a" * 32 for event in events if event.get("media")
+    )
+
+
+def test_mcp_audio_is_never_sent_to_ollama(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from ollama_web import llm
+
+    registry = ToolRegistry()
+
+    def executor(full_name: str, arguments: dict[str, object]) -> ToolExecutionResult:
+        return ToolExecutionResult(
+            text="music generated",
+            artifacts=[
+                ToolArtifact(
+                    kind="audio",
+                    mime="audio/mpeg",
+                    name="generated.mp3",
+                    data=b"audio-bytes",
+                    file_id="b" * 32,
+                )
+            ],
+        )
+
+    registry.register_mcp_tool(
+        "mcp__test__audio",
+        {"type": "function", "function": {"name": "mcp__test__audio"}},
+        executor,
+    )
+
+    class FakeClient:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, Any]] = []
+
+        def chat(self, **kwargs: Any) -> list[SimpleNamespace]:
+            self.calls.append(kwargs)
+            if len(self.calls) == 1:
+                return [
+                    SimpleNamespace(
+                        message={
+                            "content": "",
+                            "tool_calls": [
+                                {
+                                    "function": {
+                                        "name": "mcp__test__audio",
+                                        "arguments": {},
+                                    }
+                                }
+                            ],
+                        }
+                    )
+                ]
+            return [SimpleNamespace(message={"content": "done"})]
+
+    client = FakeClient()
+    monkeypatch.setattr(llm, "get_client", lambda _host=None: client)
+
+    list(
+        llm.stream_chat_with_tools(
+            [Message(role="user", content="generate")],
+            model="test-model",
+            registry=registry,
+            capabilities={"tools", "vision"},
+            language="ja",
+        )
+    )
+
+    tool_message = next(
+        message
+        for message in reversed(client.calls[1]["messages"])
+        if getattr(message, "role", None) == "tool"
+    )
+    assert not getattr(tool_message, "images", None)
+    assert "音声データそのものはモデルへ提供されていません" in str(tool_message.content)
+    assert "YXVkaW8tYnl0ZXM" not in str(tool_message.content)
 
 
 def test_token_counts_extracts_from_dict() -> None:

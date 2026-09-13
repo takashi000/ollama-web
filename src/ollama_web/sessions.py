@@ -39,6 +39,17 @@ _IMAGE_MIMES: set[str] = {
 
 _IMAGE_SUFFIXES: set[str] = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".tif", ".tiff"}
 
+_AUDIO_MIMES: set[str] = {
+    "audio/mpeg",
+    "audio/wav",
+    "audio/x-wav",
+    "audio/ogg",
+    "audio/mp4",
+    "audio/flac",
+}
+
+_AUDIO_SUFFIXES: set[str] = {".mp3", ".wav", ".ogg", ".m4a", ".flac"}
+
 
 @dataclass
 class ChatFile:
@@ -48,7 +59,7 @@ class ChatFile:
     mime: str
     size: int
     text: str
-    source: str  # "upload" | "fetch"
+    source: str  # "upload" | "fetch" | normalized MCP tool name
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -82,6 +93,12 @@ class ChatFile:
             if name_lower.endswith(suffix):
                 return True
         return False
+
+    @property
+    def is_audio(self) -> bool:
+        """Return whether the stored metadata identifies an audio file."""
+        mime = self.mime.lower().split(";", 1)[0].strip()
+        return mime.startswith("audio/") or Path(self.name.lower()).suffix in _AUDIO_SUFFIXES
 
 
 @dataclass
@@ -343,6 +360,18 @@ class SessionStore:
             return abs_path.read_bytes()
         except Exception:  # noqa: BLE001
             return None
+
+    def get_file_path(self, session_id: str, file_id: str) -> Path | None:
+        """Return a validated stored-file path contained by the data directory."""
+        chat_file = self.get_file(session_id, file_id)
+        if chat_file is None:
+            return None
+        abs_path = (self.data_dir / chat_file.path).resolve()
+        try:
+            abs_path.relative_to(self.data_dir)
+        except ValueError:
+            return None
+        return abs_path if abs_path.is_file() else None
 
     def clear_messages(self, session_id: str) -> dict[str, Any] | None:
         """Clear all messages and attached files from the session."""

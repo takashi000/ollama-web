@@ -2,20 +2,21 @@
 
 from __future__ import annotations
 
-import base64
 import json
 from collections.abc import AsyncIterator, Callable, Iterator
 from typing import Any, cast
 
 import ollama
 from ollama import Message
+from ollama._types import Image as OllamaImage
 
 from .config import settings
 from .i18n import t
 from .mcp import redact_secrets
 from .prompts import get_prompt
+from .tools.helper.image import resize_image
 from .tools.helper.pagination import parse_paged_result, parse_token
-from .tools.registry import ToolRegistry, default_registry
+from .tools.registry import ToolExecutionResult, ToolRegistry, default_registry
 
 # Maximum successive tool-call rounds before we force a final answer.
 # Some models request many tools per round; we keep this bounded but large
@@ -100,28 +101,11 @@ def _is_image_message(message: Message) -> bool:
     return bool(images)
 
 
-def _embed_images_in_content(message: Message) -> Message:
-    """Convert image bytes attached to a message into base64 markdown links.
-
-    Non-vision models cannot consume the ``images`` field, so we fall back to
-    embedding the image as data URIs inside the text content.
-    """
-    images = getattr(message, "images", None) or []
-    if not images:
-        return message
-
-    parts: list[str] = []
-    for img in images:
-        raw = getattr(img, "value", None) or (img if isinstance(img, (bytes, bytearray)) else None)
-        if raw is None:
-            continue
-        encoded = base64.b64encode(bytes(raw)).decode("ascii")
-        # Use a generic data URI since ollama already processed the image.
-        parts.append(f"![image](data:image/png;base64,{encoded})")
-
+def _remove_images_with_notice(message: Message, language: str | None = None) -> Message:
+    """Remove unsupported image bytes and add a localized fixed notice."""
     content = str(getattr(message, "content", "") or "")
-    if parts:
-        content = content + "\n\n" + "\n\n".join(parts)
+    notice = get_prompt("vision_unsupported_attachment", lang=language)
+    content = f"{content}\n\n{notice}".strip()
 
     kwargs: dict[str, Any] = {"role": getattr(message, "role", "user"), "content": content}
     for attr in ("name", "tool_calls", "tool_name"):
@@ -248,9 +232,11 @@ def stream_chat_with_tools(
     effective_tools = tools if "tools" in caps else []
     effective_think = think if "thinking" in caps else None
 
-    # Non-vision models cannot use the ``images`` field; embed them as base64.
+    # Non-vision models receive a localized notice, never base64 image text.
     if "vision" not in caps:
-        messages = [_embed_images_in_content(m) if _is_image_message(m) else m for m in messages]
+        messages = [
+            _remove_images_with_notice(m, language) if _is_image_message(m) else m for m in messages
+        ]
 
     cumulative_tool_chars = 0
     outstanding_paged_sources: set[tuple[str, str]] = set()
@@ -370,7 +356,7 @@ def stream_chat_with_tools(
             return
 
         logger.info("executing %d tool call(s) round=%d", len(tool_calls), rounds)
-        tool_results: list[tuple[str, str]] = []
+        tool_results: list[tuple[str, ToolExecutionResult]] = []
         total_result_len = 0
         for call in tool_calls:
             name = call.get("name", "")
@@ -379,12 +365,10 @@ def stream_chat_with_tools(
 
             yield {"type": "tool_start", "name": name, "arguments": _safe_tool_arguments(args)}
             t1 = time.time()
-            remaining_context = MAX_TOOL_CONTEXT_CHARS - (
-                cumulative_tool_chars + total_result_len
-            )
+            remaining_context = MAX_TOOL_CONTEXT_CHARS - (cumulative_tool_chars + total_result_len)
             is_builtin_paged = name in {"scrape_url", "pdf_to_text", "search_and_fetch"}
             if is_builtin_paged and remaining_context < settings.max_tool_result_chars:
-                result = (
+                detailed_result = ToolExecutionResult(
                     "Tool context budget exhausted before this paged call was executed. "
                     "Unread content remains; do not claim that the source was read in full."
                 )
@@ -392,14 +376,15 @@ def stream_chat_with_tools(
                 logger.info("paged tool skipped name=%s reason=context_budget", name)
             else:
                 try:
-                    result = reg.execute(
+                    detailed_result = reg.execute_detailed(
                         name, args if isinstance(args, dict) else json.dumps(args)
                     )
                 except Exception as exc:  # noqa: BLE001
                     logger.warning(
                         "tool %s execution failed in %.2fs: %s", name, time.time() - t1, exc
                     )
-                    result = f"Tool execution failed: {exc}"
+                    detailed_result = ToolExecutionResult(f"Tool execution failed: {exc}")
+                result = detailed_result.text
                 raw_is_paged = _PAGE_INFO_MARKER in result
                 if raw_is_paged:
                     _, _, next_token = parse_paged_result(result)
@@ -412,20 +397,56 @@ def stream_chat_with_tools(
                     outstanding_paged_sources.discard(paged_source)
             # Always truncate per-tool result immediately so it does not bloat
             # the context even before we reach the cumulative limit.
-            result = _safe_tool_result(_trim_tool_result(result, settings.max_tool_result_chars))
+            result = _safe_tool_result(
+                _trim_tool_result(detailed_result.text, settings.max_tool_result_chars)
+            )
+            detailed_result.text = result
             logger.info(
                 "tool %s executed len=%d elapsed=%.2fs",
                 name,
                 len(result),
                 time.time() - t1,
             )
-            yield {"type": "tool_end", "name": name, "result": result}
-            tool_results.append((name, result))
+            media = [
+                artifact.public_dict()
+                for artifact in detailed_result.artifacts
+                if artifact.for_user and artifact.file_id is not None
+            ]
+            event: dict[str, Any] = {"type": "tool_end", "name": name, "result": result}
+            if media:
+                event["media"] = media
+            yield event
+            tool_results.append((name, detailed_result))
             total_result_len += len(result)
 
-        cumulative_tool_chars += sum(len(r) for _, r in tool_results)
-        for name, result in tool_results:
-            messages.append(Message(role="tool", tool_name=name, content=result))
+        cumulative_tool_chars += sum(len(r.text) for _, r in tool_results)
+        for name, detailed_result in tool_results:
+            content = detailed_result.text
+            image_values: list[OllamaImage] = []
+            has_hidden_image = False
+            has_audio = False
+            for artifact in detailed_result.artifacts:
+                if not artifact.for_assistant:
+                    continue
+                if artifact.kind == "image":
+                    if "vision" in caps:
+                        processed = resize_image(artifact.data, name=artifact.name)
+                        image_values.append(OllamaImage(value=processed))
+                    else:
+                        has_hidden_image = True
+                elif artifact.kind == "audio":
+                    has_audio = True
+            notices: list[str] = []
+            if has_hidden_image:
+                notices.append(get_prompt("mcp_image_artifact_notice", lang=language))
+            if has_audio:
+                notices.append(get_prompt("mcp_audio_artifact_notice", lang=language))
+            if notices:
+                content = f"{content}\n\n" + "\n\n".join(notices)
+            kwargs: dict[str, Any] = {"role": "tool", "tool_name": name, "content": content}
+            if image_values:
+                kwargs["images"] = image_values
+            messages.append(Message(**kwargs))
 
     # Exceeded tool rounds: ask for a final answer without tools.
     logger.info(
@@ -441,9 +462,7 @@ def stream_chat_with_tools(
     }
     limit_instruction = get_prompt("tool_limit_instruction", lang=language)
     if outstanding_paged_sources:
-        limit_instruction += "\n\n" + get_prompt(
-            "pagination_incomplete_instruction", lang=language
-        )
+        limit_instruction += "\n\n" + get_prompt("pagination_incomplete_instruction", lang=language)
         yield {
             "type": "warning",
             "message": t("status.pagination_incomplete", lang=language),

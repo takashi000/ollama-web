@@ -126,6 +126,12 @@ def create_app() -> Starlette:
             name="delete_file",
         ),
         Route(
+            "/api/sessions/{session_id}/files/{file_id}/content",
+            sessions_route.get_file_content,
+            methods=["GET", "HEAD"],
+            name="get_file_content",
+        ),
+        Route(
             "/api/sessions/{session_id}/messages",
             sessions_route.clear_messages,
             methods=["DELETE"],

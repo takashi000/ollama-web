@@ -8,9 +8,15 @@ from typing import Any, cast
 
 from starlette.datastructures import UploadFile
 from starlette.requests import Request
-from starlette.responses import JSONResponse
+from starlette.responses import FileResponse, JSONResponse, Response
 
-from ..sessions import _IMAGE_MIMES, _IMAGE_SUFFIXES, SessionStore, is_valid_id
+from ..sessions import (
+    _AUDIO_MIMES,
+    _IMAGE_MIMES,
+    _IMAGE_SUFFIXES,
+    SessionStore,
+    is_valid_id,
+)
 from ..tools.helper.pdf import extract_pdf_page
 
 logger = logging.getLogger("ollama_web.sessions")
@@ -124,7 +130,10 @@ async def upload_file(request: Request) -> JSONResponse:
         content_type = getattr(upload_file, "content_type", None) or "application/octet-stream"
         text = ""
         if _is_image_file(name, content_type):
-            # Images are passed to ollama via Message.images (base64), not as text.
+            # Images are passed to capable models via Message.images, not as text.
+            text = ""
+        elif content_type.lower().startswith("audio/"):
+            # Audio is UI-only until Ollama audio input support is explicit.
             text = ""
         elif content_type == "application/pdf" or name.lower().endswith(".pdf"):
             # Store only a bounded preview. The chat-scoped PDF tool reads the
@@ -171,6 +180,33 @@ async def delete_file(request: Request) -> JSONResponse:
     if not ok:
         return JSONResponse({"error": "File not found"}, status_code=404)
     return JSONResponse({"deleted": True})
+
+
+async def get_file_content(request: Request) -> Response:
+    """Serve a stored image or audio file from the authenticated origin."""
+    store = _get_store(request)
+    session_id = request.path_params["session_id"]
+    file_id = request.path_params["file_id"]
+    if not is_valid_id(session_id) or not is_valid_id(file_id):
+        return JSONResponse({"error": "Invalid id"}, status_code=400)
+    chat_file = store.get_file(session_id, file_id)
+    path = store.get_file_path(session_id, file_id)
+    if chat_file is None or path is None:
+        return JSONResponse({"error": "File not found"}, status_code=404)
+
+    mime = chat_file.mime.lower()
+    # Trust the stored, allowlisted MIME type rather than the filename.  This
+    # prevents an HTML upload named ``*.png`` from being served inline.
+    if mime not in _IMAGE_MIMES and mime not in _AUDIO_MIMES:
+        return JSONResponse({"error": "File is not previewable"}, status_code=415)
+
+    return FileResponse(
+        path,
+        media_type=mime,
+        filename=chat_file.name,
+        content_disposition_type="inline",
+        headers={"Cache-Control": "private, no-store"},
+    )
 
 
 async def clear_messages(request: Request) -> JSONResponse:

@@ -405,6 +405,51 @@ function _renderAssistantContent(body, content) {
   }
 }
 
+function _fileContentUrl(fileId) {
+  return `/api/sessions/${encodeURIComponent(currentSessionId)}/files/${encodeURIComponent(fileId)}/content`;
+}
+
+const previewImageMimes = new Set([
+  "image/png", "image/x-png", "image/jpeg", "image/jpg", "image/gif",
+  "image/bmp", "image/webp", "image/tiff",
+]);
+const previewAudioMimes = new Set([
+  "audio/mpeg", "audio/wav", "audio/x-wav", "audio/ogg", "audio/mp4", "audio/flac",
+]);
+
+function renderMediaFiles(parent, files) {
+  const mediaFiles = (files || []).filter((file) => {
+    const mime = String(file?.mime || "").toLowerCase();
+    return previewImageMimes.has(mime) || previewAudioMimes.has(mime);
+  });
+  if (!mediaFiles.length) return;
+
+  const container = document.createElement("div");
+  container.className = "message-media";
+  for (const file of mediaFiles) {
+    let media;
+    if (previewImageMimes.has(String(file.mime).toLowerCase())) {
+      media = document.createElement("img");
+      media.alt = file.name || t("chat.image_attachment", "Attached image");
+      media.loading = "lazy";
+    } else {
+      media = document.createElement("audio");
+      media.controls = true;
+      media.preload = "metadata";
+    }
+    media.src = _fileContentUrl(file.id);
+    container.appendChild(media);
+
+    if (file.name) {
+      const label = document.createElement("div");
+      label.className = "media-label";
+      label.textContent = file.name;
+      container.appendChild(label);
+    }
+  }
+  parent.appendChild(container);
+}
+
 function renderSession() {
   chatEl.innerHTML = "";
   if (!currentSession) {
@@ -437,6 +482,10 @@ function renderSession() {
           .join(", ");
         info.textContent = t("chat.attachment_label", "Attached: {names}").replace("{names}", names);
         body.appendChild(info);
+        const attachedFiles = m.attachments
+          .map((fid) => (currentSession.files || []).find((x) => x.id === fid))
+          .filter(Boolean);
+        renderMediaFiles(body, attachedFiles);
         const filesPart = t("chat.attachment_files", "Attached files: {names}").replace("{names}", names);
         div.dataset.rawText = (m.content || "") + "\n\n" + filesPart;
       }
@@ -447,6 +496,12 @@ function renderSession() {
       } catch (renderErr) {
         console.error("failed to render assistant message", renderErr);
         body.textContent = m.content || "";
+      }
+      if (m.attachments && m.attachments.length) {
+        const attachedFiles = m.attachments
+          .map((fid) => (currentSession.files || []).find((x) => x.id === fid))
+          .filter(Boolean);
+        renderMediaFiles(body, attachedFiles);
       }
     }
   }
@@ -693,6 +748,7 @@ async function send() {
               t("status.done")
             );
             b.result.textContent = (ev.result || "").slice(0, 2000);
+            renderMediaFiles(b.result, ev.media || []);
             if (stickToBottom) {
               chatEl.scrollTop = chatEl.scrollHeight;
             }

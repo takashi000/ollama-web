@@ -265,6 +265,19 @@ def test_scrape_url_short_text_no_next_token():
     assert next_token is None
 
 
+@pytest.mark.parametrize("content_type", ["image/png", "audio/mpeg", "video/mp4"])
+def test_scrape_url_rejects_media_content(content_type):
+    from ollama_web.tools import scrape as scrape_mod
+
+    with patch.object(
+        scrape_mod,
+        "fetch_public_bytes",
+        _fake_fetch_public_bytes(b"binary", content_type),
+    ):
+        result = scrape_mod.scrape_url("https://example.com/media")
+    assert "Unsupported content type" in result
+
+
 # ---------------------------------------------------------------------------
 # pdf_to_text tests (pagination)
 # ---------------------------------------------------------------------------
@@ -338,9 +351,7 @@ def test_pdf_to_text_pagination_roundtrip(monkeypatch):
 
     pages = [f"PAGE{i:02d}-" + ("X" * (7000 if i == 0 else 80)) for i in range(30)]
     data = _make_multipage_pdf(pages)
-    expected = "\n\n".join(
-        (page.extract_text() or "") for page in PdfReader(BytesIO(data)).pages
-    )
+    expected = "\n\n".join((page.extract_text() or "") for page in PdfReader(BytesIO(data)).pages)
 
     # Patch fetch_public_bytes to return dummy bytes.
     monkeypatch.setattr(
@@ -421,9 +432,7 @@ def test_session_pdf_tool_reads_original_bytes_and_is_session_scoped(tmp_path):
     from ollama_web.tools.pdf import make_session_pdf_tool
 
     data = _make_multipage_pdf(["FIRST-" + "A" * 7000, "SECOND-" + "B" * 200])
-    expected = "\n\n".join(
-        (page.extract_text() or "") for page in PdfReader(BytesIO(data)).pages
-    )
+    expected = "\n\n".join((page.extract_text() or "") for page in PdfReader(BytesIO(data)).pages)
     store = SessionStore(tmp_path)
     session = store.create()
     other_session = store.create()
@@ -461,9 +470,7 @@ def test_search_and_fetch_pdf_pagination_is_lossless_and_persists_once(monkeypat
     from ollama_web.tools import fetch as fetch_mod
 
     data = _make_multipage_pdf([f"P{i:02d}-" + "Z" * 300 for i in range(30)])
-    expected = "\n\n".join(
-        (page.extract_text() or "") for page in PdfReader(BytesIO(data)).pages
-    )
+    expected = "\n\n".join((page.extract_text() or "") for page in PdfReader(BytesIO(data)).pages)
     monkeypatch.setattr(
         fetch_mod,
         "web_search",
@@ -513,9 +520,11 @@ def test_search_and_fetch_accepts_legacy_v1_pdf_offset(monkeypatch):
         "file_idx": 0,
         "matched": matched,
     }
-    token = base64.urlsafe_b64encode(
-        json.dumps(payload, separators=(",", ":")).encode("ascii")
-    ).decode("ascii").rstrip("=")
+    token = (
+        base64.urlsafe_b64encode(json.dumps(payload, separators=(",", ":")).encode("ascii"))
+        .decode("ascii")
+        .rstrip("=")
+    )
     monkeypatch.setattr(
         fetch_mod, "fetch_public_bytes", lambda fetched_url, timeout=None: (data, url, "")
     )
@@ -535,9 +544,7 @@ def test_attachment_context_keeps_pdf_continuation_and_registry_can_resume(tmp_p
     chat_file = store.add_file(
         session["id"], "attached.pdf", data, "application/pdf", "old preview"
     )
-    context = _attachment_context(
-        store, session["id"], [chat_file.id], total_limit=5000
-    )
+    context = _attachment_context(store, session["id"], [chat_file.id], total_limit=5000)
     assert len(context) <= 5000
     assert f'uri="attachment:{chat_file.id}"' in context
     assert "next_token:" in context
@@ -566,9 +573,7 @@ def test_uploaded_pdf_can_be_resumed_from_original_file(tmp_path, monkeypatch):
     client = TestClient(app)
     login = client.post("/api/auth/login", json={"pin": "123456"})
     csrf = login.headers["x-csrf-token"]
-    session_id = client.post(
-        "/api/sessions", headers={"X-CSRF-Token": csrf}
-    ).json()["id"]
+    session_id = client.post("/api/sessions", headers={"X-CSRF-Token": csrf}).json()["id"]
     uploaded = client.post(
         f"/api/sessions/{session_id}/files",
         headers={"X-CSRF-Token": csrf},
@@ -599,6 +604,35 @@ def test_search_and_fetch_no_results(monkeypatch):
     monkeypatch.setattr(fetch_mod, "web_search", lambda q, max_results=None: [])
     result = fetch_mod.search_and_fetch("query", "pdf")
     assert "No pdf files found" in result
+
+
+def test_search_and_fetch_rejects_unsupported_file_type(monkeypatch):
+    from ollama_web.tools import fetch as fetch_mod
+
+    search = MagicMock(return_value=[])
+    monkeypatch.setattr(fetch_mod, "web_search", search)
+    result = fetch_mod.search_and_fetch("query", "png")
+    assert result == "Invalid file type."
+    search.assert_not_called()
+
+
+def test_search_and_fetch_rejects_media_response(monkeypatch):
+    from ollama_web.tools import fetch as fetch_mod
+
+    monkeypatch.setattr(
+        fetch_mod,
+        "web_search",
+        lambda query, max_results=None: [
+            {"title": "Fake text", "href": "https://example.com/file.txt", "body": ""}
+        ],
+    )
+    monkeypatch.setattr(
+        fetch_mod,
+        "fetch_public_bytes",
+        lambda url, timeout=None: (b"binary", url, "image/png"),
+    )
+    result = fetch_mod.search_and_fetch("query", "txt")
+    assert "unsupported media content type" in result
 
 
 def test_search_and_fetch_continue_from_invalid_token():
@@ -687,9 +721,7 @@ def test_search_and_fetch_long_html_uses_full_cleaned_source(monkeypatch):
     token = None
     collected = ""
     for _ in range(20):
-        result = fetch_mod.search_and_fetch(
-            "query", "html", max_results=1, continue_from=token
-        )
+        result = fetch_mod.search_and_fetch("query", "html", max_results=1, continue_from=token)
         body, has_more, token = parse_paged_result(result)
         collected += body.split("---\n", 1)[1].removesuffix("\n")
         if not has_more:
