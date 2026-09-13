@@ -7,6 +7,8 @@
 
 ## [Unreleased]
 
+## [0.5.3] - 2026-09-13
+
 ### Added
 
 - MCP の画像・音声結果をセッションへ保存し、認証済みの同一オリジン URL からチャット上で表示・再生できるようにしました。
@@ -189,7 +191,8 @@
 
 - Web UIのセキュリティヘッダーと表示処理を強化しました。
 
-[Unreleased]: https://github.com/takashi000/ollama-web/compare/v0.5.2...HEAD
+[Unreleased]: https://github.com/takashi000/ollama-web/compare/v0.5.3...HEAD
+[0.5.3]: https://github.com/takashi000/ollama-web/compare/v0.5.2...v0.5.3
 [0.5.2]: https://github.com/takashi000/ollama-web/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/takashi000/ollama-web/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/takashi000/ollama-web/compare/v0.4.5...v0.5.0
