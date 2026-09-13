@@ -113,6 +113,35 @@ def test_katex_local_font_assets_are_present() -> None:
     assert not [path for path in font_paths if not (vendor_dir / path).exists()]
 
 
+def test_session_delete_action_is_visible_and_touch_sized_on_mobile() -> None:
+    css_path = Path(__file__).parents[1] / "src" / "ollama_web" / "static" / "style.css"
+    css = css_path.read_text(encoding="utf-8")
+    base_rule = css.index("#session-list li .delete {")
+    touch_rule = css.index("@media (max-width: 768px), (hover: none), (pointer: coarse)")
+    touch_block = css[touch_rule : css.index("#session-list li.empty", touch_rule)]
+
+    # The touch override must follow the default display:none rule so it wins
+    # in the cascade without changing hover-capable desktop behavior.
+    assert touch_rule > base_rule
+    assert "display: inline-flex" in touch_block
+    assert "min-width: 44px" in touch_block
+    assert "min-height: 44px" in touch_block
+
+
+def test_session_delete_uses_in_app_dialog_instead_of_native_confirm() -> None:
+    root = Path(__file__).parents[1] / "src" / "ollama_web"
+    template = (root / "templates" / "index.html").read_text(encoding="utf-8")
+    script = (root / "static" / "app.js").read_text(encoding="utf-8")
+
+    assert 'id="delete-session-modal"' in template
+    assert 'role="dialog"' in template
+    assert 'id="delete-session-cancel"' in template
+    assert 'id="delete-session-confirm"' in template
+    assert "confirm(" not in script
+    assert 'sessionListEl.addEventListener("click"' in script
+    assert "openDeleteSessionDialog(li.dataset.id, deleteButton)" in script
+
+
 def test_authenticated_audio_content_supports_range_requests(
     workspace_tmp: Path, monkeypatch
 ) -> None:

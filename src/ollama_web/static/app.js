@@ -15,6 +15,10 @@ const newSessionBtn = document.getElementById("new-session-btn");
 const menuBtn = document.getElementById("menu-btn");
 const sidebar = document.getElementById("sidebar");
 const sidebarBackdrop = document.getElementById("sidebar-backdrop");
+const deleteSessionModal = document.getElementById("delete-session-modal");
+const deleteSessionCancelBtn = document.getElementById("delete-session-cancel");
+const deleteSessionConfirmBtn = document.getElementById("delete-session-confirm");
+const deleteSessionStatus = document.getElementById("delete-session-status");
 const TOOLS = window.TOOLS || [];
 
 let currentSessionId = null;
@@ -23,6 +27,8 @@ let pendingFiles = [];
 let abortController = null;
 let currentCapabilities = new Set();
 let stickToBottom = true;
+let pendingDeleteSessionId = null;
+let deleteSessionTrigger = null;
 
 function updateThinkToggleState() {
   if (!thinkToggle) return;
@@ -308,15 +314,12 @@ function renderSessionList(sessions) {
     title.className = "title";
     title.textContent = s.title || s.id;
     const del = document.createElement("button");
+    del.type = "button";
     del.className = "delete";
     del.textContent = t("common.delete");
     del.title = t("chat.delete_session");
-    del.addEventListener("click", (e) => {
-      e.stopPropagation();
-      deleteSession(s.id);
-    });
+    del.setAttribute("aria-label", t("chat.delete_session"));
     li.append(title, del);
-    li.addEventListener("click", () => selectSession(s.id));
     sessionListEl.appendChild(li);
   }
 }
@@ -334,8 +337,28 @@ async function createSession() {
   }
 }
 
+function openDeleteSessionDialog(id, trigger) {
+  pendingDeleteSessionId = id;
+  deleteSessionTrigger = trigger;
+  deleteSessionStatus.textContent = "";
+  deleteSessionConfirmBtn.disabled = false;
+  deleteSessionModal.classList.add("open");
+  deleteSessionModal.setAttribute("aria-hidden", "false");
+  deleteSessionConfirmBtn.focus();
+}
+
+function closeDeleteSessionDialog({ restoreFocus = true } = {}) {
+  deleteSessionModal.classList.remove("open");
+  deleteSessionModal.setAttribute("aria-hidden", "true");
+  pendingDeleteSessionId = null;
+  deleteSessionStatus.textContent = "";
+  if (restoreFocus && deleteSessionTrigger?.isConnected) {
+    deleteSessionTrigger.focus();
+  }
+  deleteSessionTrigger = null;
+}
+
 async function deleteSession(id) {
-  if (!confirm(t("chat.delete_confirm"))) return;
   try {
     const res = await csrfFetch(`/api/sessions/${id}`, { method: "DELETE" });
     if (!res.ok) throw new Error(res.statusText);
@@ -348,9 +371,11 @@ async function deleteSession(id) {
       updateTokenGauge(0, 0);
     }
     await loadSessions();
+    return true;
   } catch (err) {
     console.error("failed to delete session", err);
-    alert(t("chat.delete_failed"));
+    deleteSessionStatus.textContent = t("chat.delete_failed");
+    return false;
   }
 }
 
@@ -583,10 +608,42 @@ sidebarBackdrop.addEventListener("click", () => {
 });
 
 sessionListEl.addEventListener("click", (e) => {
+  const deleteButton = e.target.closest(".delete");
+  if (deleteButton) {
+    e.preventDefault();
+    e.stopPropagation();
+    const li = deleteButton.closest("li");
+    if (li?.dataset.id) openDeleteSessionDialog(li.dataset.id, deleteButton);
+    return;
+  }
   const li = e.target.closest("li");
-  if (li && li.dataset.id && !e.target.closest(".delete")) {
+  if (li?.dataset.id) {
+    selectSession(li.dataset.id);
     sidebar.classList.remove("open");
     sidebarBackdrop.classList.remove("active");
+  }
+});
+
+deleteSessionCancelBtn.addEventListener("click", () => closeDeleteSessionDialog());
+
+deleteSessionConfirmBtn.addEventListener("click", async () => {
+  const id = pendingDeleteSessionId;
+  if (!id || deleteSessionConfirmBtn.disabled) return;
+  deleteSessionConfirmBtn.disabled = true;
+  deleteSessionModal.setAttribute("aria-busy", "true");
+  const deleted = await deleteSession(id);
+  deleteSessionModal.removeAttribute("aria-busy");
+  deleteSessionConfirmBtn.disabled = false;
+  if (deleted) closeDeleteSessionDialog({ restoreFocus: false });
+});
+
+deleteSessionModal.addEventListener("click", (e) => {
+  if (e.target === deleteSessionModal) closeDeleteSessionDialog();
+});
+
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && deleteSessionModal.classList.contains("open")) {
+    closeDeleteSessionDialog();
   }
 });
 

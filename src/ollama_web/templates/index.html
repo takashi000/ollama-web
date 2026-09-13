@@ -76,6 +76,25 @@
     </form>
   </div>
 
+  <div id="delete-session-modal" class="modal" aria-hidden="true">
+    <div class="modal-content confirm-modal-content" role="dialog" aria-modal="true"
+         aria-labelledby="delete-session-modal-title"
+         aria-describedby="delete-session-modal-message">
+      <div class="modal-header">
+        <h2 id="delete-session-modal-title">{{ t('chat.delete_session') }}</h2>
+      </div>
+      <div class="modal-body">
+        <p id="delete-session-modal-message" class="modal-help">{{ t('chat.delete_confirm') }}</p>
+        <div id="delete-session-status" class="delete-session-status" role="status"
+             aria-live="polite"></div>
+      </div>
+      <div class="modal-footer">
+        <button id="delete-session-cancel" type="button" class="secondary">{{ t('common.cancel') }}</button>
+        <button id="delete-session-confirm" type="button" class="danger">{{ t('common.delete') }}</button>
+      </div>
+    </div>
+  </div>
+
   <div id="settings-modal" class="modal" aria-hidden="true">
     <div class="modal-content settings-modal-content" role="dialog" aria-modal="true"
          aria-labelledby="settings-modal-title">

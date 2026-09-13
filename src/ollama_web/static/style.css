@@ -282,6 +282,20 @@ body {
   display: inline;
 }
 
+/* Touch devices cannot reliably reveal hover-only controls. Keep the action
+   visible and large enough to tap without changing the desktop interaction. */
+@media (max-width: 768px), (hover: none), (pointer: coarse) {
+  #session-list li .delete {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 44px;
+    min-height: 44px;
+    flex-shrink: 0;
+    touch-action: manipulation;
+  }
+}
+
 #session-list li.empty {
   color: var(--muted);
   font-size: 13px;
@@ -692,6 +706,16 @@ button#send-btn { padding: 0 20px; }
   flex-direction: column;
 }
 
+.confirm-modal-content {
+  width: min(420px, 100%);
+}
+
+.delete-session-status {
+  min-height: 20px;
+  color: var(--danger);
+  font-size: 13px;
+}
+
 .modal-header {
   display: flex;
   align-items: center;
@@ -753,6 +777,12 @@ button#send-btn { padding: 0 20px; }
 
 .modal-footer button.secondary {
   background: transparent;
+}
+
+.modal-footer button.danger {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #fff;
 }
 
 .mcp-server-card {
