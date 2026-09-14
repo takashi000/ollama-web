@@ -7,6 +7,12 @@
 
 ## [Unreleased]
 
+## [0.5.4] - 2026-09-14
+
+### Security
+
+- Pillow を 12.3.0、pypdf を 6.16.1、h2 を 4.4.1、cryptography を 50.0.0 へ更新し、Dependabot で報告された画像・PDF・HTTP/2・暗号処理に関する脆弱性 21 件を解消しました。h2 の依存条件に合わせて hpack も 4.2.0 へ更新しました。
+
 ## [0.5.3] - 2026-09-13
 
 ### Added
@@ -191,7 +197,8 @@
 
 - Web UIのセキュリティヘッダーと表示処理を強化しました。
 
-[Unreleased]: https://github.com/takashi000/ollama-web/compare/v0.5.3...HEAD
+[Unreleased]: https://github.com/takashi000/ollama-web/compare/v0.5.4...HEAD
+[0.5.4]: https://github.com/takashi000/ollama-web/compare/v0.5.3...v0.5.4
 [0.5.3]: https://github.com/takashi000/ollama-web/compare/v0.5.2...v0.5.3
 [0.5.2]: https://github.com/takashi000/ollama-web/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/takashi000/ollama-web/compare/v0.5.0...v0.5.1
