@@ -79,6 +79,19 @@ ollama-web
 | `OLLAMA_WEB_MCP_STDIO_ALLOWLIST` | Not set | Comma-separated absolute paths of executable files allowed for stdio MCP |
 | `OLLAMA_WEB_MCP_HTTPS_ALLOWLIST` | Not set | Comma-separated hostnames allowed for remote HTTPS MCP connections |
 | `OLLAMA_WEB_LANGUAGE` | `ja` | Display language for the UI and LLM prompts (`ja` or `en`) |
+| `OLLAMA_WEB_SEARCH_REGION` | `auto` | Search region: `auto`, `us-en`, or `jp-jp`. Auto selects Japan for queries containing kana, otherwise the US. |
+
+Search uses ddgs with `backend="auto"`. Region is selected internally; the LLM tool
+still accepts only `query` and `max_results`. Detection normalizes half-width kana
+and ignores URLs and `site:`/`filetype:` tokens, without rewriting the search query.
+Kanji-only queries use `us-en`; set `jp-jp` to prefer Japan for every query. This
+setting is independent of the UI language and takes effect after restarting the app.
+Invalid values stop startup with a configuration error.
+
+Search summaries omit malformed URLs and known Bing ad links, and represent missing
+or URL-only titles as an empty string while keeping the URL and snippet. Filtering
+can reduce the result count; it does not trigger extra requests. Provider failures
+remain tool errors.
 
 ### Multilingual Support
 

@@ -73,7 +73,7 @@ def test_web_search_provider_error_is_written_to_server_log(
         def __exit__(self, *args):
             return None
 
-        def text(self, query, max_results=5):
+        def text(self, query, max_results=5, *, region, backend):
             raise RuntimeError("403 Forbidden")
 
     with patch("ollama_web.tools.search.DDGS", FailingDDGS), TestClient(create_app()):
@@ -83,6 +83,6 @@ def test_web_search_provider_error_is_written_to_server_log(
 
     assert result == {"error": "RuntimeError: 403 Forbidden"}
     content = (data_dir / "server.log").read_text(encoding="utf-8")
-    assert "DuckDuckGo web search failed" in content
+    assert "ddgs web search failed" in content
     assert "RuntimeError: 403 Forbidden" in content
     assert "private search terms" not in content

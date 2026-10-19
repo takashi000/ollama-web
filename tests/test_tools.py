@@ -103,7 +103,9 @@ def test_web_search_mocked():
         def __exit__(self, *a):
             return None
 
-        def text(self, q, max_results=5):
+        def text(self, q, max_results=5, *, region, backend):
+            assert region == "us-en"
+            assert backend == "auto"
             return fake
 
     monkey = MagicMock()
@@ -126,7 +128,7 @@ def test_web_search_returns_empty_list_for_no_provider_results() -> None:
         def __exit__(self, *args):
             return None
 
-        def text(self, query, max_results=5):
+        def text(self, query, max_results=5, *, region, backend):
             return []
 
     with patch.object(search_mod, "DDGS", EmptyDDGS):
@@ -145,7 +147,7 @@ def test_web_search_logs_and_propagates_provider_errors(
         def __exit__(self, *args):
             return None
 
-        def text(self, query, max_results=5):
+        def text(self, query, max_results=5, *, region, backend):
             raise RuntimeError("403 Forbidden")
 
     with (
@@ -155,7 +157,7 @@ def test_web_search_logs_and_propagates_provider_errors(
         with pytest.raises(RuntimeError, match="403 Forbidden"):
             search_mod.web_search("private search terms")
 
-    assert "DuckDuckGo web search failed" in caplog.text
+    assert "ddgs web search failed" in caplog.text
     assert "private search terms" not in caplog.text
 
     registry = ToolRegistry()

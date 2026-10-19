@@ -12,6 +12,13 @@ def _csv_env(name: str) -> list[str]:
     return [part.strip() for part in raw.split(",") if part.strip()]
 
 
+def _search_region_env() -> str:
+    region = os.environ.get("OLLAMA_WEB_SEARCH_REGION", "auto").strip().lower()
+    if region not in {"auto", "us-en", "jp-jp"}:
+        raise ValueError("OLLAMA_WEB_SEARCH_REGION must be one of: auto, us-en, jp-jp")
+    return region
+
+
 @dataclass
 class Settings:
     """Runtime settings resolved from environment variables."""
@@ -48,6 +55,7 @@ class Settings:
     scrape_timeout: float = 15.0
     scrape_max_chars: int = 4000
     search_max_results: int = 5
+    search_region: str = field(default_factory=_search_region_env)
     fetch_max_results: int = 3
     fetch_max_chars: int = 8000
     max_fetch_mb: int = 10

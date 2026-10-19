@@ -31,7 +31,7 @@ ollama-web は LLM（Ollama）にツール呼び出し（function calling）機�
 
 | ツール名 | 実装ファイル | 概要 | ページング対応 |
 |----------|--------------|------|----------------|
-| `web_search` | [`search.py`](src/ollama_web/tools/search.py:1) | DuckDuckGo による Web 検索 | ❌ 対象外 |
+| `web_search` | [`search.py`](src/ollama_web/tools/search.py:1) | ddgs による複数検索元の Web 検索 | ❌ 対象外 |
 | `scrape_url` | [`scrape.py`](src/ollama_web/tools/scrape.py:1) | URL のページ本文抽出 | ✅ 文字オフセット |
 | `pdf_to_text` | [`pdf.py`](src/ollama_web/tools/pdf.py:1) | リモート PDF のテキスト抽出 | ✅ ページオフセット |
 | `search_and_fetch` | [`fetch.py`](src/ollama_web/tools/fetch.py:1) | ファイル種別検索＋取得 | ✅ ファイル単位 |
@@ -41,7 +41,7 @@ ollama-web は LLM（Ollama）にツール呼び出し（function calling）機�
 ## 1. web_search
 
 - **実装**: [`web_search()`](src/ollama_web/tools/search.py:10)
-- **バックエンド**: [`ddgs`](https://pypi.org/project/ddgs/) (DuckDuckGo Search)
+- **バックエンド**: [`ddgs`](https://pypi.org/project/ddgs/) 9.16.0（ロック版）の `auto`。DuckDuckGo 専用ではなく、利用可能な検索元をライブラリが選択します。
 
 ### スキーマ
 
@@ -56,13 +56,16 @@ ollama-web は LLM（Ollama）にツール呼び出し（function calling）機�
 
 | キー | 型 | 説明 |
 |------|----|------|
-| `title` | `str` | 検索結果のタイトル |
+| `title` | `str` | 検索結果のタイトル。空・欠損・URL形式の場合は空文字。本文で補完しない |
 | `href` | `str` | 結果URL（`href` が無い場合は `url` をフォールバック） |
 | `body` | `str` | スニペット（`body` が無い場合は `snippet` をフォールバック） |
 
 ### 設計上の注意点
 
-- 検索失敗時は例外を握りつぶし空リスト `[]` を返す（チャットループ継続のため）。
+- provider の失敗はログへ記録して例外を伝播し、ツール実行層がエラー応答へ変換します。空クエリや provider が正常に空リストを返した場合とは区別します。
+- region は `OLLAMA_WEB_SEARCH_REGION`（既定 `auto`）から内部選択します。かなを含む検索本文は `jp-jp`、それ以外は `us-en`。固定指定も可能です。公開スキーマには追加しません。
+- backend は `auto` を維持します。検索元の認証・アクセス制限やHTML抽出不整合で取得に失敗する場合があり、今回の比較では複数backend指定による成功率向上も確認できていません。
+- 構文上無効なURLと、Yahoo包装解除後を含む既知のBing広告遷移URLを除外します。残る結果の順序は保持し、除外後の不足分を埋める追加検索はしません。
 - **ページング対象外**。検索結果キャッシュが必要になること、DuckDuckGo API 呼び出し回数増でアクセス制限に引っかかりやすくなる懸念から除外。
 
 ---

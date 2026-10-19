@@ -79,6 +79,17 @@ ollama-web
 | `OLLAMA_WEB_MCP_STDIO_ALLOWLIST` | 未設定 | stdio MCP で起動を許可する実行ファイル絶対パスのカンマ区切り |
 | `OLLAMA_WEB_MCP_HTTPS_ALLOWLIST` | 未設定 | remote HTTPS MCP 接続を許可するホスト名のカンマ区切り |
 | `OLLAMA_WEB_LANGUAGE` | `ja` | UI と LLM プロンプトの表示言語（`ja` または `en`） |
+| `OLLAMA_WEB_SEARCH_REGION` | `auto` | 検索地域。`auto` / `us-en` / `jp-jp`。auto はかなを含むクエリを日本、それ以外を米国として検索 |
+
+検索は ddgs の `backend="auto"` を使用します。地域は内部で選び、LLM に公開する引数は
+`query` と `max_results` のままです。判定では半角カナも正規化し、URL と `site:` / `filetype:`
+のトークンを除外します。検索へ送る元クエリは変更しません。漢字だけのクエリは `us-en`
+になるため、日本へ固定する場合は `jp-jp` を設定してください。UI 言語には連動せず、
+設定変更の反映にはアプリの再起動が必要です。不正な設定値では起動時にエラーになります。
+
+構文上無効な URL と既知の Bing 広告リンクを除外し、空・URL 形式のタイトルは空文字にして
+URL と要約を保持します。除外で件数が減っても追加検索は行いません。provider の失敗は
+ツールエラーとして伝えます。
 
 ### 多言語対応
 
