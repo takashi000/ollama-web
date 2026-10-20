@@ -33,7 +33,8 @@ def main() -> None:
             "floors = {'anyio': '4.14.2', 'PyJWT': '2.15.1', 'pypdf': '6.19.0', "
             "'mcp': '1.30.0', 'soupsieve': '2.9.0', 'pillow': '12.3.0', "
             "'cryptography': '50.0.0'}; "
-            "assert Path(ollama_web.__file__).resolve().is_relative_to(Path(sys.prefix)); "
+            "assert Path(ollama_web.__file__).resolve().is_relative_to("
+            "Path(sys.prefix).resolve()), (ollama_web.__file__, sys.prefix); "
             "assert all(Version(version(p)) >= Version(v) for p, v in floors.items()); "
             "print({p: version(p) for p in floors})",
         )
