@@ -81,6 +81,22 @@ Pillow
   License:   MIT-CMU License / HPND-style historical PIL license
   Source:    https://github.com/python-pillow/Pillow
 
+MCP Python SDK
+  License:   MIT
+  Source:    https://github.com/modelcontextprotocol/python-sdk
+
+AnyIO
+  License:   MIT
+  Source:    https://github.com/agronholm/anyio
+
+PyJWT
+  License:   MIT
+  Source:    https://github.com/jpadilla/pyjwt
+
+Soup Sieve
+  License:   MIT
+  Source:    https://github.com/facelessuser/soupsieve
+
 ------------------------------------------------------------------------------
 3. Development Dependencies (not distributed with the application)
 ------------------------------------------------------------------------------
