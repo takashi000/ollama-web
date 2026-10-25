@@ -36,11 +36,23 @@ jobs:
       - name: Import native dependencies
         run: uv run --locked python -c "import PIL._imaging, pydantic_core, cryptography, _cffi_backend, lxml.etree, primp"
       - name: Test locked installation
-        run: uv run --locked pytest -q
+        run: uv run --locked pytest -q -m "not ui"
       - name: Lint
         run: uv run --locked ruff check src tests scripts/check_wheel_install.py scripts/check_dependabot_resolution.py
       - name: Type check
         run: uv run --locked mypy src/
+      - name: Install Chromium for UI tests
+        if: matrix.python == '3.14'
+        run: uv run --locked playwright install --with-deps chromium
+      - name: Test chat Stop button in Chromium
+        if: matrix.python == '3.14'
+        run: uv run --locked pytest -q -m ui --basetemp .cache/ui-tests
+      - name: Upload UI diagnostics
+        if: failure() && matrix.python == '3.14'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ui-diagnostics-${{ matrix.os }}
+          path: .cache/ui-tests
       - name: Build distributions
         run: uv build --out-dir dist/security-validation
       - name: Test ordinary pip wheel installation

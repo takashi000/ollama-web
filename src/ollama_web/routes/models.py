@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from functools import partial
+
+import anyio
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
@@ -11,7 +14,7 @@ from ollama_web import llm
 async def get_models(request: Request) -> JSONResponse:
     """Return available Ollama models as JSON."""
     host = request.app.state.settings.ollama_host
-    models = llm.list_models(host=host)
+    models = await anyio.to_thread.run_sync(partial(llm.list_models, host=host))
     return JSONResponse({"models": models})
 
 
@@ -24,13 +27,15 @@ async def get_model_capabilities(request: Request) -> JSONResponse:
     """
     model = request.path_params["model"]
     host = request.app.state.settings.ollama_host
-    caps = sorted(llm.get_model_capabilities(model, host=host))
+    caps = sorted(await anyio.to_thread.run_sync(
+        partial(llm.get_model_capabilities, model, host=host)
+    ))
     return JSONResponse({"capabilities": caps})
 
 
 async def health(request: Request) -> JSONResponse:
     """Report Ollama server reachability."""
     host = request.app.state.settings.ollama_host
-    models = llm.list_models(host=host)
+    models = await anyio.to_thread.run_sync(partial(llm.list_models, host=host))
     reachable = models is not None
     return JSONResponse({"reachable": reachable, "models": models})

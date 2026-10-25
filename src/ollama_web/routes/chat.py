@@ -8,15 +8,18 @@ import inspect
 import json
 import logging
 from collections.abc import AsyncIterator
+from contextlib import aclosing
 from datetime import datetime
-from typing import Any
+from typing import Any, cast
 
+import anyio
 from ollama import Message
 from ollama._types import Image as OllamaImage
 from starlette.requests import Request
 from starlette.responses import StreamingResponse
+from starlette.types import Receive, Scope, Send
 
-from ..i18n import t
+from ..chat_worker import worker_events
 from ..mcp import collect_mcp_tools, make_mcp_executor
 from ..prompts import get_prompt
 from ..sessions import SessionStore, is_valid_id
@@ -253,11 +256,79 @@ async def _event_stream(
     session_id: str | None,
 ) -> AsyncIterator[bytes]:
     """Yield SSE events from the tool-augmented chat loop."""
-    # Send a keepalive comment immediately so the browser knows the connection is alive.
-    yield b":\n\n"
-    async for chunk in _chat_event_stream(request, payload, session_id):
-        data = json.dumps(chunk, ensure_ascii=False)
-        yield f"data: {data}\n\n".encode()
+    runtime = request.app.state.settings
+    store = request.app.state.session_store
+    raw_messages = payload.get("messages", [])
+    user_content = _limit_text(
+        str(raw_messages[-1].get("content", "") or "") if raw_messages else "",
+        runtime.max_message_chars,
+    )
+    file_ids = [str(f) for f in payload.get("file_ids", []) if is_valid_id(str(f))]
+    assistant_text = ""
+    assistant_files: list[str] = []
+    done: dict[str, Any] | None = None
+    saved = False
+
+    def save_accepted() -> None:
+        nonlocal saved
+        if saved:
+            return
+        saved = True
+        if session_id and (user_content or file_ids) and store.get(session_id) is not None:
+            store.add_message(session_id, "user", user_content, attachments=file_ids)
+            if assistant_text or assistant_files:
+                store.add_message(
+                    session_id, "assistant", assistant_text, attachments=assistant_files,
+                    token_count=_token_count_from_done(done, int((done or {}).get("num_ctx", 0))),
+                )
+
+    try:
+        yield b":\n\n"
+        async with aclosing(
+            worker_events(runtime, store, payload, session_id, before_close=save_accepted)
+        ) as events:
+            async for event in events:
+                if event.get("type") == "delta":
+                    assistant_text = _limit_text(
+                        assistant_text + event.get("content", ""), runtime.max_message_chars
+                    )
+                elif event.get("type") == "error":
+                    assistant_text = f"[ERROR] {event.get('message', '')}"
+                elif event.get("type") == "done":
+                    done = event
+                elif event.get("type") == "tool_end":
+                    for media in event.get("media", []):
+                        file_id = str(media.get("id", ""))
+                        if is_valid_id(file_id) and file_id not in assistant_files:
+                            assistant_files.append(file_id)
+                yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n".encode()
+    except Exception as exc:
+        logger.exception("chat worker failed")
+        assistant_text = f"[ERROR] {exc}"
+        yield f"data: {json.dumps({'type': 'error', 'message': str(exc)})}\n\n".encode()
+    finally:
+        # Only accepted events are saved, once, even on disconnect.
+        save_accepted()
+
+
+class ChatStreamingResponse(StreamingResponse):
+    """Listen for disconnect even while a worker produces no response bytes."""
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        try:
+            async with anyio.create_task_group() as group:
+                async def stream() -> None:
+                    try:
+                        await self.stream_response(send)
+                    finally:
+                        group.cancel_scope.cancel()
+
+                group.start_soon(stream)
+                await self.listen_for_disconnect(receive)
+                group.cancel_scope.cancel()
+        finally:
+            with anyio.CancelScope(shield=True):
+                await cast(Any, self.body_iterator).aclose()
 
 
 async def _chat_event_stream(
@@ -286,9 +357,7 @@ async def _chat_event_stream(
         str(file_id) for file_id in payload.get("file_ids", []) if is_valid_id(str(file_id))
     ]
     user_content = ""
-    assistant_text = ""
-    assistant_file_ids: list[str] = []
-    last_done_event: dict[str, Any] | None = None
+    sent_done = False
 
     try:
         session_messages: list[Message] = []
@@ -401,65 +470,25 @@ async def _chat_event_stream(
             options=ollama_options,
             language=language,
         ):
-            if event.get("type") == "delta":
-                assistant_text = _limit_text(
-                    assistant_text + event.get("content", ""),
-                    request.app.state.settings.max_message_chars,
-                )
             if event.get("type") == "done":
                 event["num_ctx"] = num_ctx
-                last_done_event = event
+                sent_done = True
             if event.get("type") == "tool_end":
-                for media in event.get("media", []):
-                    file_id = str(media.get("id", ""))
-                    if is_valid_id(file_id) and file_id not in assistant_file_ids:
-                        assistant_file_ids.append(file_id)
+                # A worker's fetched-file cache is request-local. Transfer each
+                # completed tool's files before continuing to another round.
+                if session_id:
+                    for fetched_file in pop_fetched_files(session_id):
+                        store.add_file(
+                            session_id, fetched_file["name"], fetched_file["data"],
+                            fetched_file["mime"], fetched_file["text"], source="fetch",
+                        )
             yield event
 
     except Exception as exc:  # noqa: BLE001
         logger.exception("chat stream failed")
         error_msg = f"Stream failed: {exc}"
         yield {"type": "error", "message": error_msg}
-        # Persist the error as the assistant message so it survives reloads
-        # and re-renders in the chat pane.
-        assistant_text = (
-            f"[ERROR] {error_msg}\n\n{t('errors.vision_model_required', lang=language)}"
-        )
-
-    finally:
-        # Persist user and assistant messages to the session even when the
-        # upstream call failed, so the UI keeps the user message.
-        if session_id and (user_content or file_ids):
-            store.add_message(
-                session_id=session_id,
-                role="user",
-                content=user_content,
-                attachments=file_ids,
-            )
-            if assistant_text or assistant_file_ids:
-                token_count = _token_count_from_done(last_done_event, num_ctx)
-                store.add_message(
-                    session_id=session_id,
-                    role="assistant",
-                    content=assistant_text,
-                    attachments=assistant_file_ids,
-                    token_count=token_count,
-                )
-
-        # Persist fetched files from tools like search_and_fetch.
-        if session_id:
-            fetched = pop_fetched_files(session_id)
-            for f in fetched:
-                store.add_file(
-                    session_id=session_id,
-                    name=f["name"],
-                    data=f["data"],
-                    mime=f["mime"],
-                    text=f["text"],
-                    source="fetch",
-                )
-
-        # Always emit a terminal done event so the client closes cleanly.
+    if not sent_done:
         yield {"type": "done"}
 
 
@@ -494,7 +523,7 @@ async def chat(request: Request) -> StreamingResponse:
         session_id,
         msg_count,
     )
-    return StreamingResponse(
+    return ChatStreamingResponse(
         _event_stream(request, payload, session_id),
         media_type="text/event-stream",
     )

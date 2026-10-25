@@ -18,11 +18,6 @@ from .tools.helper.image import resize_image
 from .tools.helper.pagination import parse_paged_result, parse_token
 from .tools.registry import ToolExecutionResult, ToolRegistry, default_registry
 
-# Maximum successive tool-call rounds before we force a final answer.
-# Some models request many tools per round; we keep this bounded but large
-# enough to let iterative research complete (e.g. search, then fetch).
-MAX_TOOL_ROUNDS = 5
-
 # Upper bound on the cumulative size of tool results sent back to ollama.
 
 # Larger values can cause ollama to spend a very long time processing the
@@ -176,14 +171,16 @@ def _trim_tool_result(result: str, limit: int) -> str:
             "Paged tool result exceeded the context-safe result limit. "
             "Repeat the same tool call with a smaller max_chars value; no part "
             "of this page was consumed."
-        )
+        )[:limit]
 
     # No footer: legacy truncation behaviour.
-    cutoff = result[:limit].rsplit("\n\n", 1)[0]
-    if len(cutoff) < limit * 0.5:
+    suffix = "\n\n…[tool result truncated]"
+    body_limit = max(0, limit - len(suffix))
+    cutoff = result[:body_limit].rsplit("\n\n", 1)[0]
+    if len(cutoff) < body_limit * 0.5:
         # No good paragraph boundary; cut at a space instead.
-        cutoff = result[:limit].rsplit(" ", 1)[0]
-    return cutoff + "\n\n…[tool result truncated]"
+        cutoff = result[:body_limit].rsplit(" ", 1)[0]
+    return (cutoff + suffix)[:limit]
 
 
 def _paged_source_key(name: str, arguments: Any) -> tuple[str, str]:
@@ -245,14 +242,14 @@ def stream_chat_with_tools(
     empty_retries = 0
 
     rounds = 0
-    while rounds < MAX_TOOL_ROUNDS:
+    budget_exhausted = False
+    while not budget_exhausted:
         rounds += 1
         full_message: dict[str, Any] = {"role": "assistant", "content": "", "thinking": ""}
         tool_calls: list[dict[str, Any]] = []
         logger.info(
-            "tool round %d/%d start messages=%d model=%s cumulative_tool_chars=%d",
+            "tool round %d start messages=%d model=%s cumulative_tool_chars=%d",
             rounds,
-            MAX_TOOL_ROUNDS,
             len(messages),
             model,
             cumulative_tool_chars,
@@ -319,7 +316,7 @@ def stream_chat_with_tools(
                 "type": "status",
                 "message": t("status.empty_response_retry", lang=language),
             }
-            # Retry the same round without consuming the tool round budget.
+            # Retry the same round; empty responses retain their own retry limit.
             rounds -= 1
             # Small pause to avoid hammering the upstream.
             time.sleep(0.5)
@@ -343,7 +340,7 @@ def stream_chat_with_tools(
                     "message": t("status.pagination_incomplete", lang=language),
                 }
             if is_empty:
-                # Ran out of tool rounds while still empty; surface a warning.
+                # Exhausted the empty-response retry budget.
                 yield {
                     "type": "warning",
                     "message": t("status.empty_response", lang=language),
@@ -363,18 +360,26 @@ def stream_chat_with_tools(
             args = call.get("arguments", {})
             paged_source = _paged_source_key(name, args)
 
-            yield {"type": "tool_start", "name": name, "arguments": _safe_tool_arguments(args)}
             t1 = time.time()
             remaining_context = MAX_TOOL_CONTEXT_CHARS - (cumulative_tool_chars + total_result_len)
             is_builtin_paged = name in {"scrape_url", "pdf_to_text", "search_and_fetch"}
-            if is_builtin_paged and remaining_context < settings.max_tool_result_chars:
+            if budget_exhausted or remaining_context < settings.max_tool_result_chars:
+                budget_exhausted = True
                 detailed_result = ToolExecutionResult(
-                    "Tool context budget exhausted before this paged call was executed. "
+                    ("Tool context budget exhausted before this call was executed. "
                     "Unread content remains; do not claim that the source was read in full."
+                    )[:max(0, remaining_context)]
                 )
-                outstanding_paged_sources.add(paged_source)
-                logger.info("paged tool skipped name=%s reason=context_budget", name)
+                if is_builtin_paged:
+                    outstanding_paged_sources.add(paged_source)
+                logger.info("tool skipped name=%s reason=context_budget", name)
+                # Keep a matching tool response for every assistant request, but
+                # do not emit execution events. Skip notices fit the remaining budget.
+                tool_results.append((name, detailed_result))
+                total_result_len += len(detailed_result.text)
+                continue
             else:
+                yield {"type": "tool_start", "name": name, "arguments": _safe_tool_arguments(args)}
                 try:
                     detailed_result = reg.execute_detailed(
                         name, args if isinstance(args, dict) else json.dumps(args)
@@ -397,9 +402,16 @@ def stream_chat_with_tools(
                     outstanding_paged_sources.discard(paged_source)
             # Always truncate per-tool result immediately so it does not bloat
             # the context even before we reach the cumulative limit.
-            result = _safe_tool_result(
-                _trim_tool_result(detailed_result.text, settings.max_tool_result_chars)
-            )
+            notices: list[str] = []
+            if any(a.for_assistant and a.kind == "image" for a in detailed_result.artifacts):
+                if "vision" not in caps:
+                    notices.append(get_prompt("mcp_image_artifact_notice", lang=language))
+            if any(a.for_assistant and a.kind == "audio" for a in detailed_result.artifacts):
+                notices.append(get_prompt("mcp_audio_artifact_notice", lang=language))
+            text = detailed_result.text
+            if notices:
+                text += "\n\n" + "\n\n".join(notices)
+            result = _trim_tool_result(_safe_tool_result(text), settings.max_tool_result_chars)
             detailed_result.text = result
             logger.info(
                 "tool %s executed len=%d elapsed=%.2fs",
@@ -419,12 +431,9 @@ def stream_chat_with_tools(
             tool_results.append((name, detailed_result))
             total_result_len += len(result)
 
-        cumulative_tool_chars += sum(len(r.text) for _, r in tool_results)
         for name, detailed_result in tool_results:
             content = detailed_result.text
             image_values: list[OllamaImage] = []
-            has_hidden_image = False
-            has_audio = False
             for artifact in detailed_result.artifacts:
                 if not artifact.for_assistant:
                     continue
@@ -432,35 +441,25 @@ def stream_chat_with_tools(
                     if "vision" in caps:
                         processed = resize_image(artifact.data, name=artifact.name)
                         image_values.append(OllamaImage(value=processed))
-                    else:
-                        has_hidden_image = True
-                elif artifact.kind == "audio":
-                    has_audio = True
-            notices: list[str] = []
-            if has_hidden_image:
-                notices.append(get_prompt("mcp_image_artifact_notice", lang=language))
-            if has_audio:
-                notices.append(get_prompt("mcp_audio_artifact_notice", lang=language))
-            if notices:
-                content = f"{content}\n\n" + "\n\n".join(notices)
+            cumulative_tool_chars += len(content)
             kwargs: dict[str, Any] = {"role": "tool", "tool_name": name, "content": content}
             if image_values:
                 kwargs["images"] = image_values
             messages.append(Message(**kwargs))
 
-    # Exceeded tool rounds: ask for a final answer without tools.
+    # Result budget exhausted: ask for a final answer without more tools.
     logger.info(
         (
-            "max tool rounds exceeded, requesting final answer without tools "
+            "tool context budget exhausted, requesting final answer without tools "
             "(cumulative_tool_chars=%d)"
         ),
         cumulative_tool_chars,
     )
     yield {
         "type": "status",
-        "message": t("status.tool_limit_reached", lang=language),
+        "message": t("status.tool_context_exhausted", lang=language),
     }
-    limit_instruction = get_prompt("tool_limit_instruction", lang=language)
+    limit_instruction = get_prompt("tool_context_instruction", lang=language)
     if outstanding_paged_sources:
         limit_instruction += "\n\n" + get_prompt("pagination_incomplete_instruction", lang=language)
         yield {

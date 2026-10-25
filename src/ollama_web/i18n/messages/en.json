@@ -77,7 +77,7 @@
     "done": "Done",
     "connecting": "Connecting…",
     "disconnected": "Disconnected",
-    "tool_limit_reached": "Tool call limit reached. Summarizing findings…",
+    "tool_context_exhausted": "Tool result budget exhausted. Summarizing available information…",
     "pagination_incomplete": "The source still has unread content. The answer uses only the retrieved portion.",
     "thinking": "Thinking process",
     "executing_tool": "Executing {label}…",

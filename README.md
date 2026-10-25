@@ -240,8 +240,12 @@ Supported parameters:
 ## Development
 
 ```bash
-# Tests
-pytest
+# Unit and integration tests
+pytest -m "not ui"
+
+# UI tests (real Chromium, local Ollama/MCP stand-ins)
+playwright install chromium
+pytest -m ui
 
 # Lint
 ruff check .
@@ -251,6 +255,13 @@ mypy src/
 ```
 
 This repository keeps pytest, ruff, and mypy configurations in `pyproject.toml`.
+
+Tool calls have no fixed count or round limit. Built-in and MCP tools share a
+24,000-character result budget, with up to 6,000 characters reserved per call.
+Stop aborts the existing chat connection and ends its local worker and owned
+stdio processes. Work already accepted by an external server may continue.
+See [tool result handling](docs/tools-schema.md) for details.
+Set `OLLAMA_WEB_LIVE_MODEL` to an installed model to include live Ollama tests.
 
 
 ## License

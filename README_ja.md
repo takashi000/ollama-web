@@ -237,8 +237,12 @@ python scripts/calc_server.py streamable-http 9001
 ## Development
 
 ```bash
-# テスト
-pytest
+# 単体・統合テスト
+pytest -m "not ui"
+
+# UIテスト（実ChromiumとローカルのOllama/MCP模擬サーバー）
+playwright install chromium
+pytest -m ui
 
 # Lint
 ruff check .
@@ -248,6 +252,13 @@ mypy src/
 ```
 
 このリポジトリでは `pyproject.toml` に pytest、ruff、mypy の設定をまとめています。
+
+ツールの実行件数・ラウンド数に固定上限はありません。内蔵・MCP共通で累積24000文字の
+結果予算を適用し、次の実行前に6000文字分の余裕を確認します。
+停止ボタンは既存のチャット接続を切断し、専用ワーカーと所有するstdioプロセスを終了します。
+外部サーバーが受理済みの処理は継続する場合があります。
+詳細は [ツール仕様](docs/tools-schema.md) を参照してください。
+実Ollamaのテストも実行する場合は、`OLLAMA_WEB_LIVE_MODEL` に利用可能なモデル名を指定します。
 
 
 ## License

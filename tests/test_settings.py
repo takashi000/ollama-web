@@ -170,7 +170,7 @@ def test_options_are_forwarded_to_tool_and_final_rounds(monkeypatch: pytest.Monk
 
     client = FakeClient()
     monkeypatch.setattr(llm, "get_client", lambda _host=None: client)
-    monkeypatch.setattr(llm, "MAX_TOOL_ROUNDS", 1)
+    monkeypatch.setattr(llm, "MAX_TOOL_CONTEXT_CHARS", 0)
     options = {"temperature": 0.8, "num_ctx": 8192, "top_p": 0.9}
     events = list(
         llm.stream_chat_with_tools(

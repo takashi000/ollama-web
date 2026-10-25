@@ -739,9 +739,20 @@ async function send() {
 
   let placeholderCleared = false;
   let streamRafId = null;
+  let stopped = false;
+  abortController.signal.addEventListener("abort", () => {
+    stopped = true;
+    buffer = "";
+    if (streamRafId !== null) {
+      cancelAnimationFrame(streamRafId);
+      streamRafId = null;
+    }
+    assistantBody.textContent = assistantText || t("chat.stopped");
+  }, { once: true });
 
   function flushStreamFrame() {
     streamRafId = null;
+    if (stopped) return;
     if (!placeholderCleared) {
       assistantBody.innerHTML = "";
       placeholderCleared = true;
@@ -769,6 +780,7 @@ async function send() {
   }
 
   function appendDelta(content) {
+    if (stopped) return;
     assistantText += content;
     scheduleStreamUpdate();
   }
@@ -776,7 +788,7 @@ async function send() {
   try {
     while (true) {
       const { done, value } = await reader.read();
-      if (done) break;
+      if (done || stopped) break;
       buffer += decoder.decode(value, { stream: true });
 
       const endIndex = buffer.lastIndexOf("\n\n");
@@ -881,7 +893,7 @@ async function send() {
     }
   } catch (err) {
     if (err.name === "AbortError") {
-      assistantBody.textContent = t("chat.stopped");
+      assistantBody.textContent = assistantText || t("chat.stopped");
     } else {
       assistantBody.textContent = t("chat.error_prefix", "Error: {message}").replace("{message}", err.message);
     }
@@ -890,7 +902,7 @@ async function send() {
 
   // Flush any trailing SSE data that did not end with a double newline.
   let hadTrailingDelta = false;
-  if (buffer.trim()) {
+  if (!stopped && buffer.trim()) {
     for (const payload of parseSseEvent(buffer)) {
       if (!payload.trim()) continue;
       let ev;
@@ -927,7 +939,7 @@ async function send() {
     flushStreamFrame();
   }
 
-  if (!assistantText && !pendingTools.length && !thinkingBody && !gotError) {
+  if (!stopped && !assistantText && !pendingTools.length && !thinkingBody && !gotError) {
     assistantBody.textContent = t("chat.no_response");
   }
 
@@ -948,7 +960,7 @@ async function send() {
   // not lost when renderSession() rebuilds the chat pane.
   const errorHtml = gotError ? assistantBody.innerHTML : null;
 
-  await selectSession(currentSessionId);
+  if (!stopped) await selectSession(currentSessionId);
 
   if (tokenCount) {
     updateTokenGauge(tokenCount.prompt_eval_count, numCtx);
