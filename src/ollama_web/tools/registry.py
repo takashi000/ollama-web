@@ -7,6 +7,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
+from ..context_budget import ResultBudget, current_result_budget
 from .fetch import search_and_fetch
 from .pdf import pdf_to_text
 from .scrape import scrape_url
@@ -107,10 +108,18 @@ class ToolRegistry:
         return self._tools.get(name)
 
     def execute_detailed(
-        self, name: str, arguments: dict[str, object] | str
+        self,
+        name: str,
+        arguments: dict[str, object] | str,
+        *,
+        result_budget: ResultBudget | None = None,
     ) -> ToolExecutionResult:
         """Execute a tool while preserving any binary artifacts separately."""
-        result = self._execute_raw(name, arguments)
+        token = current_result_budget.set(result_budget)
+        try:
+            result = self._execute_raw(name, arguments)
+        finally:
+            current_result_budget.reset(token)
         if isinstance(result, ToolExecutionResult):
             return result
         if isinstance(result, str):

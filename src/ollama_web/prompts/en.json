@@ -21,5 +21,6 @@
     "no_results": "No {file_type} files found for query: {query}",
     "empty_query": "Empty query.",
     "invalid_type": "Invalid file type."
-  }
+  },
+  "image_budget_notice": "The image artifact was retained for the user, but its contents were omitted from the model input because they do not fit the context budget."
 }

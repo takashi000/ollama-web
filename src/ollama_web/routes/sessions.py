@@ -138,10 +138,7 @@ async def upload_file(request: Request) -> JSONResponse:
         elif content_type == "application/pdf" or name.lower().endswith(".pdf"):
             # Store only a bounded preview. The chat-scoped PDF tool reads the
             # original bytes on demand and exposes the lossless continuation.
-            preview_limit = min(
-                request.app.state.settings.max_attachment_text_chars,
-                request.app.state.settings.max_tool_result_chars,
-            )
+            preview_limit = request.app.state.settings.max_attachment_text_chars
             text = extract_pdf_page(
                 data,
                 max_chars=preview_limit,

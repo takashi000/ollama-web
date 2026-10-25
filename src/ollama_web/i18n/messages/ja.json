@@ -83,7 +83,8 @@
     "executing_tool": "{label} を実行中…",
     "running": "実行中…",
     "empty_response": "モデルから空の応答が返されました。もう一度送信してください。",
-    "empty_response_retry": "応答が空でした。リトライ中…"
+    "empty_response_retry": "応答が空でした。リトライ中…",
+    "context_headroom": "会話と回答用の容量を確保できません。新しい会話を始めるか、コンテキスト設定を見直してください。"
   },
   "errors": {
     "generic": "エラーが発生しました",
@@ -141,5 +142,38 @@
       "invalid_integer": "整数を入力してください。",
       "invalid_number": "数値を入力してください。"
     }
+  },
+  "budget": {
+    "title": "ツール予算（推定）",
+    "used": "使用量 / 累積上限",
+    "input": "入力全体（推定）",
+    "capacity": "実効コンテキスト",
+    "requested": "要求コンテキスト",
+    "next": "次の結果に使える量",
+    "reserve": "回答・思考用予約",
+    "safety": "安全余白",
+    "source": "容量の取得元",
+    "ratios": "累積 / 1回 / 回答予約 / 安全余白",
+    "reason": "停止理由",
+    "unit": "トークン",
+    "sources": {
+      "model": "モデル情報",
+      "requested": "要求設定",
+      "runtime": "実行時割り当て",
+      "fallback": "代替値"
+    },
+    "reasons": {
+      "tool_total_limit": "ツール結果の累積上限",
+      "context_headroom": "コンテキストの空き容量不足",
+      "result_metadata_too_large": "ページ継続情報の容量不足"
+    },
+    "capacity_estimated": "容量は推定値です",
+    "capacity_reported": "取得した容量を使用しています",
+    "help": "実効コンテキスト長に対する割合です。使用量は推定し、Ollamaの実測で補正します。",
+    "total_ratio": "ツール結果の累積予算 (%)",
+    "per_result_ratio": "1回の結果予算 (%)",
+    "response_reserve_ratio": "回答・思考用予約 (%)",
+    "safety_margin_ratio": "安全余白 (%)",
+    "invalid": "各割合は正数、1回は累積以下、累積＋回答予約＋安全余白は100%未満にしてください。"
   }
 }

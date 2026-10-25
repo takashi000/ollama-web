@@ -240,14 +240,19 @@ def _token_count_from_done(
         return None
     prompt_eval_count = done_event.get("prompt_eval_count")
     eval_count = done_event.get("eval_count")
-    if prompt_eval_count is None or eval_count is None:
+    if (prompt_eval_count is None or eval_count is None) and "context_budget" not in done_event:
         return None
-    return {
-        "prompt_eval_count": int(prompt_eval_count),
-        "eval_count": int(eval_count),
-        "num_ctx": num_ctx,
-        "total_count": int(prompt_eval_count) + int(eval_count),
-    }
+    result: dict[str, Any] = {"num_ctx": num_ctx}
+    if prompt_eval_count is not None and eval_count is not None:
+        result.update(
+            prompt_eval_count=int(prompt_eval_count),
+            eval_count=int(eval_count),
+            total_count=int(prompt_eval_count) + int(eval_count),
+        )
+    for key in ("requested_num_ctx", "context_budget"):
+        if key in done_event:
+            result[key] = done_event[key]
+    return result
 
 
 async def _event_stream(
@@ -278,7 +283,10 @@ async def _event_stream(
             store.add_message(session_id, "user", user_content, attachments=file_ids)
             if assistant_text or assistant_files:
                 store.add_message(
-                    session_id, "assistant", assistant_text, attachments=assistant_files,
+                    session_id,
+                    "assistant",
+                    assistant_text,
+                    attachments=assistant_files,
                     token_count=_token_count_from_done(done, int((done or {}).get("num_ctx", 0))),
                 )
 
@@ -317,6 +325,7 @@ class ChatStreamingResponse(StreamingResponse):
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         try:
             async with anyio.create_task_group() as group:
+
                 async def stream() -> None:
                     try:
                         await self.stream_response(send)
@@ -383,7 +392,8 @@ async def _chat_event_stream(
 
         from ollama_web import llm  # local import to avoid circular at module load
 
-        capabilities = llm.get_model_capabilities(model, host=host)
+        model_info = llm.get_model_info(model, host=host)
+        capabilities = {str(c).lower() for c in (model_info.get("capabilities") or [])}
         logger.info(
             "chat stream model=%s capabilities=%s",
             model,
@@ -469,9 +479,11 @@ async def _chat_event_stream(
             capabilities=capabilities,
             options=ollama_options,
             language=language,
+            model_info=model_info,
+            budget_options=app_settings["tool_budget"],
         ):
             if event.get("type") == "done":
-                event["num_ctx"] = num_ctx
+                event.setdefault("num_ctx", num_ctx)
                 sent_done = True
             if event.get("type") == "tool_end":
                 # A worker's fetched-file cache is request-local. Transfer each
@@ -479,8 +491,12 @@ async def _chat_event_stream(
                 if session_id:
                     for fetched_file in pop_fetched_files(session_id):
                         store.add_file(
-                            session_id, fetched_file["name"], fetched_file["data"],
-                            fetched_file["mime"], fetched_file["text"], source="fetch",
+                            session_id,
+                            fetched_file["name"],
+                            fetched_file["data"],
+                            fetched_file["mime"],
+                            fetched_file["text"],
+                            source="fetch",
                         )
             yield event
 

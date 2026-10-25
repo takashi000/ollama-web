@@ -78,14 +78,15 @@ def test_stream_chat_with_tools_disables_unsupported_capabilities(
     assert client.calls[0]["tools"] == []
     assert client.calls[0]["think"] is None
     assert client.calls[0]["stream"] is True
-    assert events[-1] == {"type": "done"}
+    assert events[-1]["type"] == "done"
 
 
 @pytest.mark.parametrize(
-    ("capabilities", "expect_images", "notice"),
+    ("capabilities", "expect_images", "notice", "num_ctx"),
     [
-        ({"tools", "vision"}, True, None),
-        ({"tools"}, False, "画像の内容はモデルへ提供されていません"),
+        ({"tools", "vision"}, True, None, 131072),
+        ({"tools"}, False, "画像の内容はモデルへ提供されていません", 8192),
+        ({"tools", "vision"}, False, "コンテキスト予算に収まらない", 8192),
     ],
 )
 def test_mcp_image_is_only_sent_to_vision_models(
@@ -93,6 +94,7 @@ def test_mcp_image_is_only_sent_to_vision_models(
     capabilities: set[str],
     expect_images: bool,
     notice: str | None,
+    num_ctx: int,
 ) -> None:
     from ollama_web import llm
 
@@ -152,6 +154,7 @@ def test_mcp_image_is_only_sent_to_vision_models(
             model="test-model",
             registry=registry,
             capabilities=capabilities,
+            options={"num_ctx": num_ctx},
             language="ja",
         )
     )
@@ -280,7 +283,8 @@ def test_more_than_five_tool_rounds(monkeypatch, kind):
     registry.register(lookup)
     remote = "mcp__test__lookup"
     registry.register_mcp_tool(
-        remote, {"type": "function", "function": {"name": remote}},
+        remote,
+        {"type": "function", "function": {"name": remote}},
         lambda name, arguments: lookup(**arguments),
     )
 
@@ -293,36 +297,53 @@ def test_more_than_five_tool_rounds(monkeypatch, kind):
                 return [SimpleNamespace(message={"content": "complete"})]
             assert kwargs["tools"]
             name = remote if kind == "mcp" or (kind == "mixed" and self.calls % 2) else "lookup"
-            return [SimpleNamespace(message={"tool_calls": [{"function": {
-                "name": name, "arguments": {"query": self.calls},
-            }}]})]
+            return [
+                SimpleNamespace(
+                    message={
+                        "tool_calls": [
+                            {
+                                "function": {
+                                    "name": name,
+                                    "arguments": {"query": self.calls},
+                                }
+                            }
+                        ]
+                    }
+                )
+            ]
 
     client = Client()
     monkeypatch.setattr(llm, "get_client", lambda host=None: client)
-    events = list(llm.stream_chat_with_tools(
-        [Message(role="user", content="research")], "test", registry=registry,
-        capabilities={"tools"},
-    ))
+    events = list(
+        llm.stream_chat_with_tools(
+            [Message(role="user", content="research")],
+            "test",
+            registry=registry,
+            capabilities={"tools"},
+        )
+    )
     assert executed == list(range(1, 9))
     assert client.calls == 9
-    assert events[-1] == {"type": "done"}
+    assert events[-1]["type"] == "done"
 
 
-@pytest.mark.parametrize("name", ["lookup", "web_search", "scrape_url", "mcp__test__lookup"])
-@pytest.mark.parametrize("budget", [5999, 6000, 12000, 18000, 24000])
-def test_result_budget_is_shared_and_stops_rest_of_batch(monkeypatch, name, budget):
+@pytest.mark.parametrize("name", ["lookup", "web_search", "mcp__test__lookup"])
+@pytest.mark.parametrize("capacity", [16384, 65536, 131072])
+def test_result_budget_is_shared_and_stops_rest_of_batch(monkeypatch, name, capacity):
     from ollama_web import llm
+    from ollama_web.context_budget import DEFAULT_RATIOS, ResultBudget
 
     executed = []
     registry = ToolRegistry()
 
     def lookup(query: int) -> str:
         executed.append(query)
-        return "x" * 7000
+        return "x" * 20000
 
     if name.startswith("mcp__"):
         registry.register_mcp_tool(
-            name, {"type": "function", "function": {"name": name}},
+            name,
+            {"type": "function", "function": {"name": name}},
             lambda full_name, arguments: lookup(**arguments),
         )
     else:
@@ -336,28 +357,41 @@ def test_result_budget_is_shared_and_stops_rest_of_batch(monkeypatch, name, budg
         def chat(self, **kwargs):
             self.calls.append(kwargs)
             if len(self.calls) == 1:
-                return [SimpleNamespace(message={"tool_calls": [
-                    {"function": {"name": name, "arguments": {"query": n}}}
-                    for n in range(6)
-                ]})]
+                return [
+                    SimpleNamespace(
+                        message={
+                            "tool_calls": [
+                                {"function": {"name": name, "arguments": {"query": n}}}
+                                for n in range(6)
+                            ]
+                        }
+                    )
+                ]
             assert kwargs["tools"] == []
             results = [m.content for m in kwargs["messages"] if m.role == "tool"]
             assert len(results) == 6
-            assert sum(len(result) for result in results) <= budget
-            assert all(len(result) <= 6000 for result in results)
             return [SimpleNamespace(message={"content": "partial answer"})]
 
     client = Client()
     monkeypatch.setattr(llm, "get_client", lambda host=None: client)
-    monkeypatch.setattr(llm, "MAX_TOOL_CONTEXT_CHARS", budget)
-    events = list(llm.stream_chat_with_tools(
-        [Message(role="user", content="research")], "test", registry=registry,
-        capabilities={"tools"}, language="en",
-    ))
-    assert len(executed) == budget // 6000
-    assert len([e for e in events if e["type"] == "tool_start"]) == len(executed)
+    events = list(
+        llm.stream_chat_with_tools(
+            [Message(role="user", content="research")],
+            "test",
+            registry=registry,
+            capabilities={"tools"},
+            language="en",
+            options={"num_ctx": capacity},
+            budget_options={**DEFAULT_RATIOS, "total_ratio": 0.1},
+        )
+    )
+    executed_events = [e for e in events if e["type"] == "tool_end"]
+    assert 2 <= len(executed) < 6
+    assert len(executed_events) == len(executed)
+    assert all(ResultBudget(int(capacity * 0.05)).fits(e["result"]) for e in executed_events)
+    assert events[-1]["context_budget"]["tool_tokens"] <= int(capacity * 0.1)
+    assert events[-1]["context_budget"]["stop_reason"] == "tool_total_limit"
     assert len(client.calls) == 2
-    assert any(e["type"] == "status" for e in events)
 
 
 def test_paged_source_normal_finish_emits_incomplete_warning(monkeypatch):
@@ -376,17 +410,33 @@ def test_paged_source_normal_finish_emits_incomplete_warning(monkeypatch):
         def chat(self, **kwargs):
             self.calls += 1
             if self.calls == 1:
-                return [SimpleNamespace(message={"tool_calls": [{"function": {
-                    "name": "scrape_url", "arguments": {"url": "https://example.com"},
-                }}]})]
+                return [
+                    SimpleNamespace(
+                        message={
+                            "tool_calls": [
+                                {
+                                    "function": {
+                                        "name": "scrape_url",
+                                        "arguments": {"url": "https://example.com"},
+                                    }
+                                }
+                            ]
+                        }
+                    )
+                ]
             return [SimpleNamespace(message={"content": "partial answer"})]
 
     client = Client()
     monkeypatch.setattr(llm, "get_client", lambda host=None: client)
-    events = list(llm.stream_chat_with_tools(
-        [Message(role="user", content="read")], "test", registry=registry,
-        capabilities={"tools"}, language="en",
-    ))
+    events = list(
+        llm.stream_chat_with_tools(
+            [Message(role="user", content="read")],
+            "test",
+            registry=registry,
+            capabilities={"tools"},
+            language="en",
+        )
+    )
     assert any(e["type"] == "warning" for e in events)
     assert client.calls == 2
 
@@ -406,5 +456,5 @@ def test_empty_retry_budget_is_preserved(monkeypatch):
     monkeypatch.setattr("time.sleep", lambda duration: None)
     events = list(llm.stream_chat_with_tools([Message(role="user", content="test")], "test"))
     assert client.calls == 3
-    assert events[-1] == {"type": "done"}
+    assert events[-1]["type"] == "done"
     assert any(e["type"] == "warning" for e in events)

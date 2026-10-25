@@ -21,5 +21,6 @@
     "no_results": "No {file_type} files found for query: {query}",
     "empty_query": "Empty query.",
     "invalid_type": "Invalid file type."
-  }
+  },
+  "image_budget_notice": "画像は生成されましたが、コンテキスト予算に収まらないため画像内容をモデルへ渡していません。"
 }

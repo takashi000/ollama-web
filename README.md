@@ -256,8 +256,11 @@ mypy src/
 
 This repository keeps pytest, ruff, and mypy configurations in `pyproject.toml`.
 
-Tool calls have no fixed count or round limit. Built-in and MCP tools share a
-24,000-character result budget, with up to 6,000 characters reserved per call.
+Tool calls have no fixed count, round, or character limit. Built-in and MCP tools share a
+context-dependent estimated token budget (default: 50% total, 5% per result,
+20% response reserve, 10% safety margin), configurable in Ollama settings.
+Result sizes shrink to the remaining headroom; Ollama measurements correct estimates.
+See [dynamic context budgets](docs/context-budget.md) for capacity resolution and limitations.
 Stop aborts the existing chat connection and ends its local worker and owned
 stdio processes. Work already accepted by an external server may continue.
 See [tool result handling](docs/tools-schema.md) for details.

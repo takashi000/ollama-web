@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from ..config import settings
+from ..context_budget import standalone_result_limit
 from ..prompts import get_prompt, get_prompts
 from .helper.pagination import (
     PageResult,
@@ -314,7 +315,7 @@ def _render_file_page(
             lambda _budget: page,
             lambda next_cursor: _make_fetch_token(matched, next_cursor, ft),
             requested_chars=per_file_chars,
-            result_limit=settings.max_tool_result_chars,
+            result_limit=standalone_result_limit(per_file_chars),
         )
 
     import httpx
@@ -418,7 +419,7 @@ def _render_file_page(
             page_factory,
             lambda cursor: _make_fetch_token(matched, cursor, ft),
             requested_chars=per_file_chars,
-            result_limit=settings.max_tool_result_chars,
+            result_limit=standalone_result_limit(per_file_chars),
             prefix=prefix,
             suffix="\n",
         )

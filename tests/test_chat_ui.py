@@ -33,9 +33,66 @@ def login(page, app):
     page.locator("#model-select option").first.wait_for(state="attached")
 
 
-@pytest.mark.parametrize("mode,mcp", [("llm", None), ("stream", None),
-                                      ("mcp", "list"), ("mcp", "call"), ("empty", None),
-                                      ("mcp", "http-call")])
+@pytest.mark.parametrize(
+    "language,label", [("en", "Tool budget (estimated)"), ("ja", "ツール予算（推定）")]
+)
+def test_dynamic_budget_settings_and_saved_display(tmp_path, browser_page, language, label):
+    from playwright.sync_api import expect
+
+    page = browser_page
+    with running_app(tmp_path / "app", mode="budget", model="fixture:cloud") as app:
+        config = app.client.get("/api/settings").json()
+        config["ui"]["language"] = language
+        assert app.client.put("/api/settings", headers=app.headers, json=config).is_success
+        login(page, app)
+        page.locator("#general-settings-btn").click()
+        page.locator("#open-ollama-settings").click()
+        total = page.locator('[data-budget="total_ratio"]')
+        per_result = page.locator('[data-budget="per_result_ratio"]')
+        expect(total).to_have_value("50")
+        total.fill("40")
+        per_result.fill("60")
+        page.locator("#settings-save-btn").click()
+        assert total.evaluate("el => el.validationMessage")
+        assert app.client.get("/api/settings").json()["tool_budget"]["total_ratio"] == 0.5
+        per_result.fill("4")
+        page.locator("#settings-save-btn").click()
+        expect(page.locator("#settings-status")).to_contain_text(
+            "保存しました" if language == "ja" else "Settings saved."
+        )
+        assert app.client.get("/api/settings").json()["tool_budget"]["total_ratio"] == 0.4
+        page.locator("#settings-modal-close").click()
+        page.locator("#input").fill("hello")
+        page.locator("#send-btn").click()
+        expect(page.locator("#chat")).to_contain_text("done")
+        expect(page.locator("#context-budget")).to_be_visible()
+        expect(page.locator("#context-budget summary")).to_contain_text(label)
+        page.locator("#context-budget summary").click()
+        expect(page.locator("#budget-details")).to_contain_text("65,536")
+        expect(page.locator("#budget-details")).to_contain_text("40% / 4% / 20% / 10%")
+        page.reload()
+        page.locator("#session-list li").filter(has_text="hello").click()
+        expect(page.locator("#context-budget")).to_be_visible()
+        page.locator("#context-budget summary").click()
+        expect(page.locator("#budget-details")).to_contain_text("65,536")
+        sessions = app.client.get("/api/sessions").json()
+        session_list = sessions if isinstance(sessions, list) else sessions["sessions"]
+        session = app.client.get(f"/api/sessions/{session_list[0]['id']}").json()
+        assert session["token_count"]["num_ctx"] == 65536
+        assert session["token_count"]["requested_num_ctx"] == 8192
+
+
+@pytest.mark.parametrize(
+    "mode,mcp",
+    [
+        ("llm", None),
+        ("stream", None),
+        ("mcp", "list"),
+        ("mcp", "call"),
+        ("empty", None),
+        ("mcp", "http-call"),
+    ],
+)
 def test_stop_button_reaps_worker_and_discards_late_output(tmp_path, browser_page, mode, mcp):
     page = browser_page
     with running_app(tmp_path / "app", mode=mode, mcp=mcp) as app:
@@ -123,7 +180,8 @@ def test_stop_and_immediate_resend(tmp_path, browser_page, finish_race):
         sessions = app.client.get("/api/sessions").json()["sessions"]
         session = app.client.get(f"/api/sessions/{sessions[0]['id']}").json()
         assert [m["content"] for m in session["messages"] if m["role"] == "user"] == [
-            "first request", "second request",
+            "first request",
+            "second request",
         ]
         answers = [m["content"] for m in session["messages"] if m["role"] == "assistant"]
         assert len(answers) == 2
@@ -148,7 +206,8 @@ def test_live_ollama_stop_and_resend(tmp_path, browser_page):
         page.locator("#send-btn").click()
         pid = wait_for(lambda: app.worker_pids() and app.worker_pids()[-1])
         expect(page.locator(".message.assistant .body").last).to_contain_text(
-            re.compile("[A-Za-z0-9]"), timeout=120000,
+            re.compile("[A-Za-z0-9]"),
+            timeout=120000,
         )
         page.locator("#cancel-btn").click()
         wait_for(lambda: not alive(pid), timeout=3)
@@ -164,7 +223,10 @@ def test_live_ollama_stdio_stop_and_resend(tmp_path, browser_page):
 
     model = os.environ["OLLAMA_WEB_LIVE_MODEL"]
     with running_app(
-        tmp_path / "live-mcp", real_host="http://127.0.0.1:11434", model=model, mcp="call",
+        tmp_path / "live-mcp",
+        real_host="http://127.0.0.1:11434",
+        model=model,
+        mcp="call",
     ) as app:
         (app.directory / "settings.json").write_text(
             '{"ollama":{"options":{"num_predict":256,"num_ctx":4096,"temperature":0.0}}}',

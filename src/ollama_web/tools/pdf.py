@@ -7,12 +7,12 @@ from collections.abc import Callable
 from typing import Any
 
 from ..config import settings
+from ..context_budget import standalone_result_limit
 from .helper.pagination import (
     PageResult,
     PageSizeError,
     format_page_to_limit,
     make_token,
-    parse_paged_result,
     parse_token,
 )
 from .helper.pdf import extract_pdf_page
@@ -115,33 +115,16 @@ def _pdf_to_text(
         )
 
     try:
-        result_limit = settings.max_tool_result_chars
-        render_limit = result_limit
-        result = ""
-        for _ in range(4):
-            result = format_page_to_limit(
-                page_factory,
-                token_factory,
-                requested_chars=requested,
-                result_limit=render_limit,
-            )
-            _, has_more, next_token = parse_paged_result(result)
-            if not has_more or next_token is None:
-                break
-            next_payload = parse_token(next_token, _TOOL_NAME)
-            resume_metadata = _RESUME_RULE.format(
-                page_index=_cursor_value(next_payload, "page_index", next_payload["offset"]),
-                page_char_offset=_cursor_value(next_payload, "page_char_offset"),
-            )
-            overflow = len(result) + len(resume_metadata) - result_limit
-            if overflow <= 0:
-                result += resume_metadata
-                break
-            render_limit -= overflow + 8
-            if render_limit <= 0:
-                raise PageSizeError("PDF continuation metadata exceeds the result limit.")
-        else:
-            raise PageSizeError("PDF continuation metadata could not fit the result limit.")
+        result = format_page_to_limit(
+            page_factory,
+            token_factory,
+            requested_chars=requested,
+            result_limit=standalone_result_limit(requested),
+            continuation_suffix=lambda cursor: _RESUME_RULE.format(
+                page_index=cursor["page_index"],
+                page_char_offset=cursor["page_char_offset"],
+            ),
+        )
     except PageSizeError as exc:
         return f"PDF pagination failed: {exc}"
 

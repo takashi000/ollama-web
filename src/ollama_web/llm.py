@@ -3,29 +3,36 @@
 from __future__ import annotations
 
 import json
-from collections.abc import AsyncIterator, Callable, Iterator
+import math
+from collections.abc import AsyncIterator, Iterator
 from typing import Any, cast
 
 import ollama
 from ollama import Message
 from ollama._types import Image as OllamaImage
+from ollama._utils import convert_function_to_tool
 
 from .config import settings
+from .context_budget import (
+    IMAGE_TOKENS,
+    ContextBudget,
+    ModelContext,
+    ResultBudget,
+    positive_int,
+    validate_ratios,
+)
 from .i18n import t
 from .mcp import redact_secrets
 from .prompts import get_prompt
 from .tools.helper.image import resize_image
-from .tools.helper.pagination import parse_paged_result, parse_token
+from .tools.helper.pagination import (
+    PageSizeError,
+    format_paged_result,
+    make_token,
+    parse_paged_result,
+    parse_token,
+)
 from .tools.registry import ToolExecutionResult, ToolRegistry, default_registry
-
-# Upper bound on the cumulative size of tool results sent back to ollama.
-
-# Larger values can cause ollama to spend a very long time processing the
-# context between rounds.
-MAX_TOOL_CONTEXT_CHARS = 24000
-
-# Type alias matching ollama's expected tools signature.
-ToolCallable = Callable[..., Any]
 
 # Marker that separates a paged tool result's body from its page-info footer.
 # Must match ``ollama_web.tools.helper.pagination.PAGE_INFO_MARKER``.
@@ -70,24 +77,25 @@ def list_models(host: str | None = None) -> list[str]:
     return models
 
 
-def get_model_capabilities(model: str, host: str | None = None) -> set[str]:
-    """Return the capability set for a single model via ``ollama.show()``.
-
-    Unknown or unreachable models are treated as having no special capabilities,
-    which keeps the UI conservative and avoids sending unsupported parameters.
-    """
+def get_model_info(model: str, host: str | None = None, *, client: Any = None) -> dict[str, Any]:
+    """Fetch model metadata once; unavailable/retired models have no metadata."""
     try:
-        client = get_client(host)
-        show_response = client.show(model)
+        active_client = client or get_client(host)
+        if isinstance(active_client, ollama.Client):
+            # Older SDK ShowResponse schemas discard remote_host/remote_model.
+            # Use the same SDK transport/auth/timeout, preserving the raw fields.
+            response = active_client._request(dict, "POST", "/api/show", json={"model": model})
+        else:
+            response = active_client.show(model)
+        if isinstance(response, dict):
+            return response
+        return dict(response.model_dump(by_alias=True, exclude_none=True))
     except Exception:  # noqa: BLE001
-        return set()
+        return {}
 
-    caps = getattr(show_response, "capabilities", None)
-    if caps is None and isinstance(show_response, dict):
-        caps = show_response.get("capabilities")
-    if not caps:
-        return set()
-    return {str(c).lower() for c in caps}
+
+def get_model_capabilities(model: str, host: str | None = None) -> set[str]:
+    return {str(c).lower() for c in (get_model_info(model, host).get("capabilities") or [])}
 
 
 def _is_image_message(message: Message) -> bool:
@@ -153,34 +161,17 @@ def _token_counts(response: Any) -> dict[str, int] | None:
     return {"prompt_eval_count": int(prompt_eval), "eval_count": int(eval_count)}
 
 
-def _trim_tool_result(result: str, limit: int) -> str:
-    """Truncate ``result`` to ``limit`` chars while keeping it readable.
-
-    Paged tools must fit their own complete envelope before advancing a cursor.
-    An oversized paged result is therefore rejected atomically instead of
-    being truncated into an unrecoverable content gap.
-    """
-    if len(result) <= limit:
-        return result
-
-    # A paged tool must size its own body before advancing its cursor. Trimming
-    # it here would create an unrecoverable gap between visible text and the
-    # next token, so fail the call atomically and let the model repeat it.
-    if _PAGE_INFO_MARKER in result:
-        return (
-            "Paged tool result exceeded the context-safe result limit. "
-            "Repeat the same tool call with a smaller max_chars value; no part "
-            "of this page was consumed."
-        )[:limit]
-
-    # No footer: legacy truncation behaviour.
-    suffix = "\n\n…[tool result truncated]"
-    body_limit = max(0, limit - len(suffix))
-    cutoff = result[:body_limit].rsplit("\n\n", 1)[0]
-    if len(cutoff) < body_limit * 0.5:
-        # No good paragraph boundary; cut at a space instead.
-        cutoff = result[:body_limit].rsplit(" ", 1)[0]
-    return (cutoff + suffix)[:limit]
+def _trim_tool_result(result: str, budget: ResultBudget, notice: str = "") -> str:
+    """Keep paged results atomic; trim other results to their token estimate."""
+    suffix = "\n\n" + notice if notice else ""
+    if _PAGE_INFO_MARKER in result and not budget.fits(result + suffix):
+        result = "Paged result metadata exceeds the available budget; page not consumed."
+    if not suffix:
+        return budget.trim(result)
+    if not budget.fits(suffix):
+        return budget.trim(notice)
+    body_budget = ResultBudget(budget.tokens - budget.estimate(suffix), budget.factor)
+    return body_budget.trim(result) + suffix
 
 
 def _paged_source_key(name: str, arguments: Any) -> tuple[str, str]:
@@ -200,6 +191,19 @@ def _paged_source_key(name: str, arguments: Any) -> tuple[str, str]:
     return name, str(source)
 
 
+def _page_metadata_fits(name: str, args: Any, budget: ResultBudget) -> bool:
+    """Reject impossible continuation envelopes before starting a built-in tool."""
+    if not isinstance(args, dict):
+        return True  # Argument validation remains the registry's responsibility.
+    try:
+        source = _paged_source_key(name, args)[1]
+        token = args.get("continue_from") or make_token(name, source, 1)
+        envelope = format_paged_result("x", has_more=True, next_token=token)
+        return budget.fits(envelope)
+    except (PageSizeError, ValueError):
+        return True  # Invalid input must be reported as an argument error, not skipped.
+
+
 def stream_chat_with_tools(
     messages: list[Message],
     model: str,
@@ -210,6 +214,8 @@ def stream_chat_with_tools(
     capabilities: set[str] | None = None,
     options: dict[str, Any] | None = None,
     language: str | None = None,
+    model_info: dict[str, Any] | None = None,
+    budget_options: dict[str, float] | None = None,
 ) -> Iterator[dict[str, Any]]:
     """Run a tool-calling chat loop and yield real streaming events from ollama.
 
@@ -225,7 +231,10 @@ def stream_chat_with_tools(
     caps = capabilities or set()
     raw_client = get_client(host)
     reg = registry or default_registry()
-    tools: list[ToolCallable] = [cast(Any, t) for t in reg.ollama_tools]
+    tools = [
+        convert_function_to_tool(t).model_dump(exclude_none=True) if callable(t) else t
+        for t in reg.ollama_tools
+    ]
     effective_tools = tools if "tools" in caps else []
     effective_think = think if "thinking" in caps else None
 
@@ -235,7 +244,37 @@ def stream_chat_with_tools(
             _remove_images_with_notice(m, language) if _is_image_message(m) else m for m in messages
         ]
 
-    cumulative_tool_chars = 0
+    metadata = (
+        model_info if model_info is not None else get_model_info(model, host, client=raw_client)
+    )
+    budget = ContextBudget(
+        ModelContext.resolve(model, metadata, options or {}),
+        num_predict=positive_int((options or {}).get("num_predict")),
+    )
+    if budget_options is not None:
+        budget.ratios = validate_ratios(budget_options)
+    budget.notification_text = (
+        get_prompt("tool_context_instruction", lang=language)
+        + "\n\n"
+        + get_prompt("pagination_incomplete_instruction", lang=language)
+    )
+
+    def budget_event() -> dict[str, Any]:
+        snapshot = budget.snapshot(messages, effective_tools)
+        logger.info("context budget %s", snapshot)
+        return {"type": "context_budget", **snapshot}
+
+    def done_event(response: Any) -> dict[str, Any]:
+        event: dict[str, Any] = {
+            "type": "done",
+            "num_ctx": budget.context.capacity,
+            "requested_num_ctx": budget.context.requested,
+            "context_budget": budget.snapshot(messages, effective_tools),
+        }
+        event.update(_token_counts(response) or {})
+        return event
+
+    runtime_checked = False
     outstanding_paged_sources: set[tuple[str, str]] = set()
 
     MAX_EMPTY_RETRIES = 2
@@ -247,13 +286,12 @@ def stream_chat_with_tools(
         rounds += 1
         full_message: dict[str, Any] = {"role": "assistant", "content": "", "thinking": ""}
         tool_calls: list[dict[str, Any]] = []
-        logger.info(
-            "tool round %d start messages=%d model=%s cumulative_tool_chars=%d",
-            rounds,
-            len(messages),
-            model,
-            cumulative_tool_chars,
-        )
+        yield budget_event()
+        sent_estimate = budget.input_tokens(messages, effective_tools)
+        if budget.headroom(messages, effective_tools) < 0:
+            yield {"type": "error", "message": t("status.context_headroom", lang=language)}
+            return
+        logger.info("tool round %d start messages=%d model=%s", rounds, len(messages), model)
 
         t0 = time.time()
         try:
@@ -325,6 +363,22 @@ def stream_chat_with_tools(
         if not is_empty:
             empty_retries = 0
 
+        budget.observe(_token_counts(last_chunk), sent_estimate)
+        logger.info(
+            "context measurement round=%d sent_estimate=%d measured=%s correction_factor=%.4f",
+            rounds,
+            sent_estimate,
+            _token_counts(last_chunk),
+            budget.factor,
+        )
+        if not runtime_checked:
+            runtime_checked = True
+            if not budget.context.cloud:
+                try:
+                    budget.update_runtime(raw_client.ps(), model)
+                except Exception:  # noqa: BLE001
+                    logger.info("runtime context unavailable; using %s", budget.context.source)
+
         # Reconstruct the assistant message including any tool_calls so the
         # next round can see them.
         if tool_calls:
@@ -345,116 +399,132 @@ def stream_chat_with_tools(
                     "type": "warning",
                     "message": t("status.empty_response", lang=language),
                 }
-            done_event: dict[str, Any] = {"type": "done"}
-            tokens = _token_counts(last_chunk)
-            if tokens:
-                done_event.update(tokens)
-            yield done_event
+            yield budget_event()
+            yield done_event(last_chunk)
             return
 
-        logger.info("executing %d tool call(s) round=%d", len(tool_calls), rounds)
-        tool_results: list[tuple[str, ToolExecutionResult]] = []
-        total_result_len = 0
-        for call in tool_calls:
+        # Reserve all matching response envelopes and skip notices before executing a batch.
+        skip_text = (
+            "Tool not executed: insufficient context or page metadata. Unread content remains."
+        )
+        notice_costs = [
+            budget.message_tokens(
+                Message(role="tool", tool_name=c.get("name", ""), content=skip_text)
+            )
+            for c in tool_calls
+        ]
+        batch_reserve = sum(notice_costs)
+        for call, notice_cost in zip(tool_calls, notice_costs, strict=True):
             name = call.get("name", "")
             args = call.get("arguments", {})
             paged_source = _paged_source_key(name, args)
-
-            t1 = time.time()
-            remaining_context = MAX_TOOL_CONTEXT_CHARS - (cumulative_tool_chars + total_result_len)
             is_builtin_paged = name in {"scrape_url", "pdf_to_text", "search_and_fetch"}
-            if budget_exhausted or remaining_context < settings.max_tool_result_chars:
-                budget_exhausted = True
-                detailed_result = ToolExecutionResult(
-                    ("Tool context budget exhausted before this call was executed. "
-                    "Unread content remains; do not claim that the source was read in full."
-                    )[:max(0, remaining_context)]
+            batch_reserve -= notice_cost
+            envelope_cost = (
+                budget.message_tokens(
+                    Message(role="tool", tool_name=name, content=""),
                 )
+                + 1
+            )
+            result_budget = budget.available(
+                messages, effective_tools, batch_reserve + envelope_cost
+            )
+            skipped = budget_exhausted or result_budget.tokens <= 0
+            metadata_skipped = (
+                not skipped
+                and is_builtin_paged
+                and not _page_metadata_fits(name, args, result_budget)
+            )
+            if skipped:
+                budget_exhausted = True
+                detailed_result = ToolExecutionResult(skip_text)
+                budget.stop_reason = budget.stop_reason or "context_headroom"
                 if is_builtin_paged:
                     outstanding_paged_sources.add(paged_source)
-                logger.info("tool skipped name=%s reason=context_budget", name)
-                # Keep a matching tool response for every assistant request, but
-                # do not emit execution events. Skip notices fit the remaining budget.
-                tool_results.append((name, detailed_result))
-                total_result_len += len(detailed_result.text)
-                continue
+                logger.info("tool skipped name=%s reason=%s", name, budget.stop_reason)
+            elif metadata_skipped:
+                skipped = True
+                detailed_result = ToolExecutionResult(skip_text)
+                budget.stop_reason = "result_metadata_too_large"
+                outstanding_paged_sources.add(paged_source)
+                logger.info("tool skipped name=%s reason=%s", name, budget.stop_reason)
             else:
                 yield {"type": "tool_start", "name": name, "arguments": _safe_tool_arguments(args)}
                 try:
                     detailed_result = reg.execute_detailed(
-                        name, args if isinstance(args, dict) else json.dumps(args)
+                        name,
+                        args if isinstance(args, dict) else json.dumps(args),
+                        result_budget=result_budget,
                     )
                 except Exception as exc:  # noqa: BLE001
-                    logger.warning(
-                        "tool %s execution failed in %.2fs: %s", name, time.time() - t1, exc
-                    )
                     detailed_result = ToolExecutionResult(f"Tool execution failed: {exc}")
-                result = detailed_result.text
-                raw_is_paged = _PAGE_INFO_MARKER in result
-                if raw_is_paged:
-                    _, _, next_token = parse_paged_result(result)
-                    if next_token and isinstance(args, dict):
-                        paged_source = _paged_source_key(
-                            name, {**args, "continue_from": next_token}
-                        )
-                    outstanding_paged_sources.add(paged_source)
-                elif is_builtin_paged:
-                    outstanding_paged_sources.discard(paged_source)
-            # Always truncate per-tool result immediately so it does not bloat
-            # the context even before we reach the cumulative limit.
-            notices: list[str] = []
-            if any(a.for_assistant and a.kind == "image" for a in detailed_result.artifacts):
-                if "vision" not in caps:
-                    notices.append(get_prompt("mcp_image_artifact_notice", lang=language))
-            if any(a.for_assistant and a.kind == "audio" for a in detailed_result.artifacts):
-                notices.append(get_prompt("mcp_audio_artifact_notice", lang=language))
-            text = detailed_result.text
-            if notices:
-                text += "\n\n" + "\n\n".join(notices)
-            result = _trim_tool_result(_safe_tool_result(text), settings.max_tool_result_chars)
-            detailed_result.text = result
-            logger.info(
-                "tool %s executed len=%d elapsed=%.2fs",
-                name,
-                len(result),
-                time.time() - t1,
-            )
-            media = [
-                artifact.public_dict()
-                for artifact in detailed_result.artifacts
-                if artifact.for_user and artifact.file_id is not None
-            ]
-            event: dict[str, Any] = {"type": "tool_end", "name": name, "result": result}
-            if media:
-                event["media"] = media
-            yield event
-            tool_results.append((name, detailed_result))
-            total_result_len += len(result)
 
-        for name, detailed_result in tool_results:
-            content = detailed_result.text
+            notices: list[str] = []
             image_values: list[OllamaImage] = []
             for artifact in detailed_result.artifacts:
                 if not artifact.for_assistant:
                     continue
                 if artifact.kind == "image":
-                    if "vision" in caps:
+                    image_cost = math.ceil(IMAGE_TOKENS * budget.factor)
+                    if "vision" in caps and result_budget.tokens > image_cost:
                         processed = resize_image(artifact.data, name=artifact.name)
                         image_values.append(OllamaImage(value=processed))
-            cumulative_tool_chars += len(content)
-            kwargs: dict[str, Any] = {"role": "tool", "tool_name": name, "content": content}
+                        result_budget = ResultBudget(
+                            result_budget.tokens - image_cost,
+                            budget.factor,
+                        )
+                    else:
+                        key = (
+                            "mcp_image_artifact_notice"
+                            if "vision" not in caps
+                            else "image_budget_notice"
+                        )
+                        notices.append(get_prompt(key, lang=language))
+                elif artifact.kind == "audio":
+                    notices.append(get_prompt("mcp_audio_artifact_notice", lang=language))
+            text = _safe_tool_result(detailed_result.text)
+            notice_text = "\n\n".join(notices)
+            raw_is_paged = _PAGE_INFO_MARKER in text
+            if raw_is_paged:
+                _, _, next_token = parse_paged_result(text)
+                if next_token and isinstance(args, dict):
+                    paged_source = _paged_source_key(name, {**args, "continue_from": next_token})
+                outstanding_paged_sources.add(paged_source)
+            elif is_builtin_paged and not skipped:
+                outstanding_paged_sources.discard(paged_source)
+            combined_text = text + ("\n\n" + notice_text if notice_text else "")
+            if raw_is_paged and not result_budget.fits(combined_text):
+                text = "Paged result metadata exceeds the available budget; page not consumed."
+                budget.stop_reason = "result_metadata_too_large"
+            elif "pagination failed:" in text and "metadata" in text.lower():
+                budget.stop_reason = "result_metadata_too_large"
+                outstanding_paged_sources.add(paged_source)
+            # Skip notices use reserved context rather than the exhausted result quota.
+            result = text if skipped else _trim_tool_result(text, result_budget, notice_text)
+            kwargs: dict[str, Any] = {"role": "tool", "tool_name": name, "content": result}
             if image_values:
                 kwargs["images"] = image_values
-            messages.append(Message(**kwargs))
+            tool_message = Message(**kwargs)
+            messages.append(tool_message)
+            if skipped:
+                budget.observed_tail += budget.message_tokens(tool_message)
+            else:
+                budget.add_result(tool_message)
+                media = [
+                    a.public_dict()
+                    for a in detailed_result.artifacts
+                    if a.for_user and a.file_id is not None
+                ]
+                event: dict[str, Any] = {"type": "tool_end", "name": name, "result": result}
+                if media:
+                    event["media"] = media
+                yield event
+            yield budget_event()
+        # A metadata-only failure must not trigger an endless identical retry loop.
+        if budget.stop_reason == "result_metadata_too_large":
+            budget_exhausted = True
 
-    # Result budget exhausted: ask for a final answer without more tools.
-    logger.info(
-        (
-            "tool context budget exhausted, requesting final answer without tools "
-            "(cumulative_tool_chars=%d)"
-        ),
-        cumulative_tool_chars,
-    )
+    logger.info("tool execution stopped reason=%s", budget.stop_reason)
     yield {
         "type": "status",
         "message": t("status.tool_context_exhausted", lang=language),
@@ -472,6 +542,13 @@ def stream_chat_with_tools(
             content=limit_instruction,
         )
     )
+    effective_tools = []
+    yield budget_event()
+    if budget.headroom(messages, []) < 0:
+        budget.stop_reason = "context_headroom"
+        yield {"type": "error", "message": t("status.context_headroom", lang=language)}
+        return
+    sent_estimate = budget.input_tokens(messages, [])
     t0 = time.time()
     try:
         stream = cast(Any, raw_client).chat(
@@ -498,11 +575,15 @@ def stream_chat_with_tools(
         if content:
             yield {"type": "delta", "content": content}
     logger.info("final answer stream finished elapsed=%.2fs", time.time() - t0)
-    done_event_final: dict[str, Any] = {"type": "done"}
-    tokens = _token_counts(last_chunk)
-    if tokens:
-        done_event_final.update(tokens)
-    yield done_event_final
+    budget.observe(_token_counts(last_chunk), sent_estimate)
+    logger.info(
+        "final context measurement sent_estimate=%d measured=%s correction_factor=%.4f",
+        sent_estimate,
+        _token_counts(last_chunk),
+        budget.factor,
+    )
+    yield budget_event()
+    yield done_event(last_chunk)
 
 
 async def astream_chat_with_tools(
@@ -515,6 +596,8 @@ async def astream_chat_with_tools(
     capabilities: set[str] | None = None,
     options: dict[str, Any] | None = None,
     language: str | None = None,
+    model_info: dict[str, Any] | None = None,
+    budget_options: dict[str, float] | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
     """Async wrapper that yields events from ``stream_chat_with_tools``."""
     import anyio
@@ -528,6 +611,8 @@ async def astream_chat_with_tools(
         capabilities=capabilities,
         options=options,
         language=language,
+        model_info=model_info,
+        budget_options=budget_options,
     )
 
     def _next() -> dict[str, Any] | None:

@@ -370,7 +370,8 @@ def test_pdf_to_text_pagination_roundtrip(monkeypatch):
             max_chars=8000,
             continue_from=token,
         )
-        assert len(result) <= 6000
+        # max_chars counts source characters; PDF page separators are also returned.
+        assert len(parse_paged_result(result)[0]) <= 8000 + 2 * len(pages)
         body_text, has_more, token = parse_paged_result(result)
         assert "next_token_is_latest:" not in body_text
         if has_more:
@@ -492,8 +493,8 @@ def test_search_and_fetch_pdf_pagination_is_lossless_and_persists_once(monkeypat
         result = fetch_mod.search_and_fetch(
             "query", "pdf", max_results=1, session_id="session", continue_from=token
         )
-        assert len(result) <= 6000
         body, has_more, token = parse_paged_result(result)
+        assert len(body.split("---\n", 1)[1].removesuffix("\n")) <= 8000
         collected += body.split("---\n", 1)[1].removesuffix("\n")
         if not has_more:
             break
@@ -581,7 +582,7 @@ def test_uploaded_pdf_can_be_resumed_from_original_file(tmp_path, monkeypatch):
         headers={"X-CSRF-Token": csrf},
         files={"files": ("upload.pdf", data, "application/pdf")},
     ).json()["files"][0]
-    assert len(uploaded["text"]) <= settings.max_tool_result_chars
+    assert len(uploaded["text"]) <= settings.max_attachment_text_chars
 
     registry = asyncio.run(_build_registry(session_id, app.state.session_store))
     first = registry.execute("pdf_to_text", {"url_or_path": f"attachment:{uploaded['id']}"})
@@ -963,31 +964,34 @@ def test_format_paged_result_marker_at_end():
 
 
 def test_trim_tool_result_rejects_oversized_paged_result_atomically():
+    from ollama_web.context_budget import ResultBudget
     from ollama_web.llm import _trim_tool_result
 
     body = "A" * 5000
     footer = "\n---page-info---\nhas_more: true\nnext_token: tok123"
     result = body + footer
-    trimmed = _trim_tool_result(result, 200)
-    assert "Repeat the same tool call" in trimmed
+    trimmed = _trim_tool_result(result, ResultBudget(100))
+    assert "page not consumed" in trimmed
     assert "tok123" not in trimmed
     assert "A" * 20 not in trimmed
 
 
 def test_trim_tool_result_no_page_info_unchanged():
     """Without a footer, legacy truncation applies (regression)."""
+    from ollama_web.context_budget import ResultBudget
     from ollama_web.llm import _trim_tool_result
 
     result = "A" * 5000
-    trimmed = _trim_tool_result(result, 200)
+    trimmed = _trim_tool_result(result, ResultBudget(100))
     assert "---page-info---" not in trimmed
-    assert "…[tool result truncated]" in trimmed
+    assert "[tool result truncated]" in trimmed
 
 
 def test_trim_tool_result_page_info_fits_limit():
     """When the whole result fits the limit, nothing is truncated."""
+    from ollama_web.context_budget import ResultBudget
     from ollama_web.llm import _trim_tool_result
 
     result = "short body\n---page-info---\nhas_more: true\nnext_token: tok"
-    trimmed = _trim_tool_result(result, 200)
+    trimmed = _trim_tool_result(result, ResultBudget(100))
     assert trimmed == result

@@ -83,7 +83,8 @@
     "executing_tool": "Executing {label}…",
     "running": "Running…",
     "empty_response": "The model returned an empty response. Please send the message again.",
-    "empty_response_retry": "Empty response received; retrying…"
+    "empty_response_retry": "Empty response received; retrying…",
+    "context_headroom": "There is insufficient context for this conversation and the response reserve. Start a new conversation or review the context setting."
   },
   "errors": {
     "generic": "An error occurred",
@@ -141,5 +142,38 @@
       "invalid_integer": "Enter an integer.",
       "invalid_number": "Enter a number."
     }
+  },
+  "budget": {
+    "title": "Tool budget (estimated)",
+    "used": "Used / total result limit",
+    "input": "Estimated full input",
+    "capacity": "Effective context",
+    "requested": "Requested context",
+    "next": "Available for next result",
+    "reserve": "Response and thinking reserve",
+    "safety": "Safety margin",
+    "source": "Capacity source",
+    "ratios": "Total / per result / response / safety",
+    "reason": "Stop reason",
+    "unit": "tokens",
+    "sources": {
+      "model": "Model metadata",
+      "requested": "Request settings",
+      "runtime": "Runtime allocation",
+      "fallback": "Fallback"
+    },
+    "reasons": {
+      "tool_total_limit": "Total tool result limit",
+      "context_headroom": "Insufficient context headroom",
+      "result_metadata_too_large": "Page metadata does not fit"
+    },
+    "capacity_estimated": "Capacity is estimated",
+    "capacity_reported": "Using reported capacity",
+    "help": "Percentages of the effective context. Usage is estimated and corrected using Ollama measurements.",
+    "total_ratio": "Total tool result budget (%)",
+    "per_result_ratio": "Per-result budget (%)",
+    "response_reserve_ratio": "Response and thinking reserve (%)",
+    "safety_margin_ratio": "Safety margin (%)",
+    "invalid": "Ratios must be positive; per-result must not exceed total; total + response + safety must be below 100%."
   }
 }

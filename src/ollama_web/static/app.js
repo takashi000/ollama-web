@@ -369,6 +369,7 @@ async function deleteSession(id) {
       pendingFiles = [];
       renderAttachments();
       updateTokenGauge(0, 0);
+      updateContextBudget(null);
     }
     await loadSessions();
     return true;
@@ -479,6 +480,7 @@ function renderSession() {
   chatEl.innerHTML = "";
   if (!currentSession) {
     updateTokenGauge(0, 0);
+    updateContextBudget(null);
     return;
   }
   const msgs = currentSession.messages || [];
@@ -836,6 +838,8 @@ async function send() {
             waiting.textContent = t("chat.generating");
             assistantBody.appendChild(waiting);
           }
+        } else if (ev.type === "context_budget") {
+          updateContextBudget(ev);
         } else if (ev.type === "status") {
           if (!placeholderCleared) {
             assistantBody.innerHTML = "";
@@ -877,6 +881,7 @@ async function send() {
           span.textContent = t("chat.error_prefix", "Error: {message}").replace("{message}", ev.message);
           assistantBody.appendChild(span);
         } else if (ev.type === "done") {
+          updateContextBudget(ev.context_budget);
           if (ev.prompt_eval_count != null && ev.eval_count != null) {
             tokenCount = {
               prompt_eval_count: ev.prompt_eval_count,
@@ -914,7 +919,10 @@ async function send() {
       if (ev.type === "delta") {
         assistantText += ev.content;
         hadTrailingDelta = true;
+      } else if (ev.type === "context_budget") {
+        updateContextBudget(ev);
       } else if (ev.type === "done") {
+        updateContextBudget(ev.context_budget);
         if (ev.prompt_eval_count != null && ev.eval_count != null) {
           tokenCount = {
             prompt_eval_count: ev.prompt_eval_count,
@@ -992,6 +1000,7 @@ async function clearMessages() {
     pendingFiles = [];
     renderAttachments();
     updateTokenGauge(0, 0);
+    updateContextBudget(null);
     return;
   }
 
@@ -1011,6 +1020,7 @@ async function clearMessages() {
     chatEl.innerHTML = "";
     renderAttachments();
     updateTokenGauge(0, 0);
+    updateContextBudget(null);
   } catch (err) {
     console.error("failed to clear messages", err);
     alert(t("chat.clear_messages_failed"));
@@ -1025,6 +1035,37 @@ cancelBtn.addEventListener("click", () => {
   }
 });
 
+function updateContextBudget(budget) {
+  const panel = document.getElementById("context-budget");
+  if (!panel) return;
+  panel.hidden = !budget;
+  if (!budget) return;
+  const fmt = (n) => Number(n || 0).toLocaleString();
+  document.getElementById("budget-usage").textContent =
+    `${fmt(budget.tool_tokens)} / ${fmt(budget.tool_limit)} ${t("budget.unit")}`;
+  const rows = [
+    [t("budget.used"), `${fmt(budget.tool_tokens)} / ${fmt(budget.tool_limit)}`],
+    [t("budget.input"), fmt(budget.input_tokens)],
+    [t("budget.capacity"), fmt(budget.effective_context)],
+    [t("budget.requested"), budget.requested_num_ctx ? fmt(budget.requested_num_ctx) : "—"],
+    [t("budget.next"), fmt(budget.next_result_tokens)],
+    [t("budget.reserve"), fmt(budget.response_reserve)],
+    [t("budget.safety"), fmt(budget.safety_margin)],
+    [t("budget.source"), t(`budget.sources.${budget.source}`)],
+  ];
+  if (budget.ratios) {
+    rows.push([t("budget.ratios"), ["total_ratio", "per_result_ratio", "response_reserve_ratio", "safety_margin_ratio"]
+      .map((key) => `${Number((budget.ratios[key] * 100).toFixed(2))}%`).join(" / ")]);
+  }
+  if (budget.stop_reason) rows.push([t("budget.reason"), t(`budget.reasons.${budget.stop_reason}`)]);
+  document.getElementById("budget-details").textContent =
+    rows.map(([key, value]) => `${key}: ${value}`).join("\n") + "\n" +
+    t(budget.capacity_estimated ? "budget.capacity_estimated" : "budget.capacity_reported");
+  updateTokenGauge(budget.input_tokens, budget.effective_context);
+  const gauge = document.getElementById("token-gauge");
+  if (gauge) gauge.title = t("budget.input");
+}
+
 function updateTokenGauge(promptEvalCount, numCtx) {
   const gaugeEl = document.getElementById("token-gauge");
   const textEl = gaugeEl ? gaugeEl.querySelector(".gauge-text") : null;
@@ -1036,6 +1077,7 @@ function updateTokenGauge(promptEvalCount, numCtx) {
     return;
   }
   gaugeEl.style.display = "";
+  gaugeEl.title = `${t("chat.token_count")}: ${promptEvalCount} / ${numCtx}`;
 
   const ratio = Math.min(Math.max(promptEvalCount / numCtx, 0), 1);
   const dash = ratio * 100;
@@ -1055,6 +1097,7 @@ function updateTokenGauge(promptEvalCount, numCtx) {
 }
 
 function updateTokenGaugeFromSession() {
+  updateContextBudget(null);
   if (!currentSession) {
     updateTokenGauge(0, 0);
     return;
@@ -1064,7 +1107,8 @@ function updateTokenGaugeFromSession() {
   const assistantMessages = messages.filter((m) => m.role === "assistant");
 
   if (tc && tc.num_ctx) {
-    updateTokenGauge(tc.prompt_eval_count || 0, tc.num_ctx || 0);
+    updateContextBudget(tc.context_budget);
+    if (tc.prompt_eval_count != null) updateTokenGauge(tc.prompt_eval_count, tc.num_ctx);
     return;
   }
 
@@ -1079,13 +1123,15 @@ function updateTokenGaugeFromSession() {
     }
   }
   if (fallback) {
-    updateTokenGauge(fallback.prompt_eval_count || 0, fallback.num_ctx || 0);
+    updateContextBudget(fallback.context_budget);
+    if (fallback.prompt_eval_count != null) updateTokenGauge(fallback.prompt_eval_count, fallback.num_ctx);
     return;
   }
 
   // Hide gauge only when the session has no chat history at all.
   if (messages.length === 0) {
     updateTokenGauge(0, 0);
+    updateContextBudget(null);
     return;
   }
 

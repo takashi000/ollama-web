@@ -32,6 +32,7 @@ def wait_for(predicate, timeout=20):
 def alive(pid):
     if os.name == "nt":
         import ctypes
+
         kernel = ctypes.WinDLL("kernel32", use_last_error=True)
         kernel.OpenProcess.restype = ctypes.c_void_p
         kernel.OpenProcess.argtypes = [ctypes.c_ulong, ctypes.c_int, ctypes.c_ulong]
@@ -93,7 +94,12 @@ class Harness:
                     if request_mode == "show":
                         harness.entered.set()
                         harness.release.wait(30)
-                    self.answer({"model_info": {}, "capabilities": ["completion", "tools"]})
+                    info = (
+                        {"general.architecture": "fixture", "fixture.context_length": 65536}
+                        if request_mode == "budget"
+                        else {}
+                    )
+                    self.answer({"model_info": info, "capabilities": ["completion", "tools"]})
                     return
                 harness.requests.append(body)
                 harness.entered.set()
@@ -107,7 +113,9 @@ class Harness:
                     harness.release.wait(30)
                     if request_mode == "stream":
                         try:
-                            self.wfile.write(b'{"message":{"content":"LATE"},"done":true}\n')
+                            self.wfile.write(
+                                b'{"message":{"role":"assistant","content":"LATE"},"done":true}\n'
+                            )
                         except OSError:
                             pass
                         return
@@ -116,14 +124,24 @@ class Harness:
                 ):
                     self.answer({"message": {"role": "assistant", "content": "done"}, "done": True})
                 elif request_mode in {"mcp", "mcp-normal"}:
-                    self.answer({"message": {"role": "assistant", "tool_calls": [
-                        {"function": {"name": "mcp__fixture__lookup", "arguments": {}}}
-                    ]}, "done": True})
+                    self.answer(
+                        {
+                            "message": {
+                                "role": "assistant",
+                                "tool_calls": [
+                                    {"function": {"name": "mcp__fixture__lookup", "arguments": {}}}
+                                ],
+                            },
+                            "done": True,
+                        }
+                    )
                 elif request_mode == "empty":
                     self.answer({"message": {"role": "assistant", "content": ""}, "done": True})
                 else:
-                    self.answer({"message": {"role": "assistant", "content": "done"},
-                                 "done": True})
+                    response = {"message": {"role": "assistant", "content": "done"}, "done": True}
+                    if request_mode == "budget":
+                        response.update(prompt_eval_count=200, eval_count=5)
+                    self.answer(response)
 
         self.external = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         self.thread = threading.Thread(target=self.external.serve_forever, daemon=True)
@@ -132,11 +150,15 @@ class Harness:
         self.mcp_process = None
         self.mcp_output = None
         if mcp:
-            config = {"mcpServers": {"fixture": {
-                "command": sys.executable,
-                "args": [str(ROOT / "tests/support/mcp_fixture.py"), str(self.marker), mcp],
-                "cwd": str(ROOT),
-            }}}
+            config = {
+                "mcpServers": {
+                    "fixture": {
+                        "command": sys.executable,
+                        "args": [str(ROOT / "tests/support/mcp_fixture.py"), str(self.marker), mcp],
+                        "cwd": str(ROOT),
+                    }
+                }
+            }
             (self.directory / "mcpServers.json").write_text(json.dumps(config), encoding="utf-8")
             if mcp.startswith("http-"):
                 with socket.socket() as sock:
@@ -144,28 +166,54 @@ class Harness:
                     mcp_port = sock.getsockname()[1]
                 self.mcp_output = (self.directory / "mcp-output.log").open("w")
                 self.mcp_process = subprocess.Popen(
-                    [sys.executable, str(ROOT / "tests/support/mcp_fixture.py"),
-                     str(self.marker), mcp.removeprefix("http-"), str(mcp_port)],
-                    stdout=self.mcp_output, stderr=subprocess.STDOUT,
+                    [
+                        sys.executable,
+                        str(ROOT / "tests/support/mcp_fixture.py"),
+                        str(self.marker),
+                        mcp.removeprefix("http-"),
+                        str(mcp_port),
+                    ],
+                    stdout=self.mcp_output,
+                    stderr=subprocess.STDOUT,
                 )
                 wait_for(lambda: any(e["stage"] == "http-ready" for e in self.mcp_events()))
                 config = {"mcpServers": {"fixture": {"url": f"http://127.0.0.1:{mcp_port}/mcp"}}}
                 (self.directory / "mcpServers.json").write_text(
-                    json.dumps(config), encoding="utf-8",
+                    json.dumps(config),
+                    encoding="utf-8",
                 )
         with socket.socket() as sock:
             sock.bind(("127.0.0.1", 0))
             self.port = sock.getsockname()[1]
         self.url = f"http://127.0.0.1:{self.port}"
-        env = {**os.environ, "OLLAMA_HOST": self.host, "OLLAMA_WEB_MODEL": self.model,
-               "OLLAMA_WEB_DATA_DIR": str(self.directory), "OLLAMA_WEB_PIN": "123456",
-               "OLLAMA_WEB_LANGUAGE": "en", "OLLAMA_WEB_MCP_STDIO_ALLOWLIST": sys.executable,
-               "PYTHONPATH": str(ROOT / "src")}
+        env = {
+            **os.environ,
+            "OLLAMA_HOST": self.host,
+            "OLLAMA_WEB_MODEL": self.model,
+            "OLLAMA_WEB_DATA_DIR": str(self.directory),
+            "OLLAMA_WEB_PIN": "123456",
+            "OLLAMA_WEB_LANGUAGE": "en",
+            "OLLAMA_WEB_MCP_STDIO_ALLOWLIST": sys.executable,
+            "PYTHONPATH": str(ROOT / "src"),
+        }
         self.output = (self.directory / "app-output.log").open("w", encoding="utf-8")
         self.process = subprocess.Popen(
-            [sys.executable, "-m", "uvicorn", "ollama_web.app:app", "--host", "127.0.0.1",
-             "--port", str(self.port), "--log-level", "warning"], cwd=ROOT, env=env,
-            stdout=self.output, stderr=subprocess.STDOUT,
+            [
+                sys.executable,
+                "-m",
+                "uvicorn",
+                "ollama_web.app:app",
+                "--host",
+                "127.0.0.1",
+                "--port",
+                str(self.port),
+                "--log-level",
+                "warning",
+            ],
+            cwd=ROOT,
+            env=env,
+            stdout=self.output,
+            stderr=subprocess.STDOUT,
         )
         self.client = httpx.Client(base_url=self.url, timeout=10, trust_env=False)
 
@@ -176,6 +224,7 @@ class Harness:
                 return self.client.get("/api/auth/status").status_code == 200
             except httpx.TransportError:
                 return False
+
         wait_for(available)
         login = self.client.post("/api/auth/login", json={"pin": "123456"})
         self.headers = {"X-CSRF-Token": login.headers["x-csrf-token"]}

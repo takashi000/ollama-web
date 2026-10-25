@@ -7,6 +7,7 @@ import logging
 from bs4 import BeautifulSoup
 
 from ..config import settings
+from ..context_budget import standalone_result_limit
 from .helper.pagination import (
     PageSizeError,
     format_page_to_limit,
@@ -94,7 +95,7 @@ def scrape_url(url: str, max_chars: int | None = None, continue_from: str | None
             lambda body_budget: text_page(cleaned, offset, body_budget),
             lambda cursor: make_token(_TOOL_NAME, url, cursor["offset"]),
             requested_chars=limit,
-            result_limit=settings.max_tool_result_chars,
+            result_limit=standalone_result_limit(limit),
         )
         logger.info(
             "scrape page offset=%d result_chars=%d has_more=%s",

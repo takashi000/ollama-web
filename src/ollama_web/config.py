@@ -63,7 +63,6 @@ class Settings:
     max_message_chars: int = 20000
     max_attachment_text_chars: int = 20000
     max_image_pixels: int = 16_000_000
-    max_tool_result_chars: int = 6000
     pagination_token_ttl: int = 1800
     language: str = field(default_factory=lambda: os.environ.get("OLLAMA_WEB_LANGUAGE", "ja"))
 

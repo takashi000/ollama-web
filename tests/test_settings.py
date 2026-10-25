@@ -14,6 +14,7 @@ from starlette.testclient import TestClient
 from ollama_web import llm
 from ollama_web.app import create_app
 from ollama_web.config import settings
+from ollama_web.context_budget import DEFAULT_RATIOS
 from ollama_web.prompts import get_prompt
 from ollama_web.routes.chat import _compose_system_prompt
 from ollama_web.settings_store import (
@@ -28,6 +29,7 @@ from ollama_web.tools.registry import ToolRegistry
 def test_missing_settings_uses_slider_defaults_and_environment_language(tmp_path: Path) -> None:
     data = load_app_settings(tmp_path, "en")
     assert data == {
+        "tool_budget": DEFAULT_RATIOS,
         "ui": {"language": "en"},
         "ollama": {
             "system_prompt": "",
@@ -51,6 +53,7 @@ def test_settings_round_trip_preserves_valid_options(tmp_path: Path) -> None:
             },
         },
     }
+    value["tool_budget"] = dict(DEFAULT_RATIOS)
     assert save_app_settings(tmp_path, value) == value
     assert load_app_settings(tmp_path, "en") == value
     on_disk = json.loads((tmp_path / "settings.json").read_text(encoding="utf-8"))
@@ -160,9 +163,7 @@ def test_options_are_forwarded_to_tool_and_final_rounds(monkeypatch: pytest.Monk
                         message={
                             "role": "assistant",
                             "content": "",
-                            "tool_calls": [
-                                {"function": {"name": "missing_tool", "arguments": {}}}
-                            ],
+                            "tool_calls": [{"function": {"name": "missing_tool", "arguments": {}}}],
                         }
                     )
                 ]
@@ -170,7 +171,6 @@ def test_options_are_forwarded_to_tool_and_final_rounds(monkeypatch: pytest.Monk
 
     client = FakeClient()
     monkeypatch.setattr(llm, "get_client", lambda _host=None: client)
-    monkeypatch.setattr(llm, "MAX_TOOL_CONTEXT_CHARS", 0)
     options = {"temperature": 0.8, "num_ctx": 8192, "top_p": 0.9}
     events = list(
         llm.stream_chat_with_tools(
@@ -180,8 +180,9 @@ def test_options_are_forwarded_to_tool_and_final_rounds(monkeypatch: pytest.Monk
             registry=ToolRegistry(),
             options=options,
             language="en",
+            budget_options={**DEFAULT_RATIOS, "total_ratio": 0.0001, "per_result_ratio": 0.0001},
         )
     )
-    assert events[-1] == {"type": "done"}
+    assert events[-1]["type"] == "done"
     assert len(client.calls) == 2
     assert all(call["options"] == options for call in client.calls)

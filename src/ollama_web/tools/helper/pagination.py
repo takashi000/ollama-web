@@ -8,6 +8,8 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+from ...context_budget import current_result_budget
+
 _TOKEN_VERSION = 2
 _SUPPORTED_TOKEN_VERSIONS = {1, 2}
 MAX_TOKEN_CHARS = 8192
@@ -112,27 +114,38 @@ def format_page_to_limit(
     token_factory: Callable[[dict[str, int]], str],
     *,
     requested_chars: int,
-    result_limit: int,
+    result_limit: int | None,
     prefix: str = "",
     suffix: str = "",
+    continuation_suffix: Callable[[dict[str, int]], str] | None = None,
 ) -> str:
     """Render the largest lossless page whose complete envelope fits the limit."""
-    body_budget = max(1, min(requested_chars, result_limit))
-    for _ in range(8):
+    budget = current_result_budget.get()
+    low, high = (
+        1,
+        max(1, min(requested_chars, result_limit) if result_limit is not None else requested_chars),
+    )
+    best: str | None = None
+    first = True
+    while low <= high:
+        body_budget = high if first else (low + high) // 2
+        first = False
         page = page_factory(body_budget)
         warning_text = "".join(f"[warning] {warning}\n" for warning in page.warnings)
         body = f"{prefix}{warning_text}{page.text}{suffix}"
         token = token_factory(page.next_cursor) if page.has_more else None
         rendered = format_paged_result(body, has_more=page.has_more, next_token=token)
-        if len(rendered) <= result_limit:
-            return rendered
-        overflow = len(rendered) - result_limit
-        new_budget = body_budget - overflow - 16
-        if new_budget >= body_budget:
-            new_budget = body_budget - 1
-        if new_budget <= 0:
-            break
-        body_budget = new_budget
+        if page.has_more and continuation_suffix:
+            rendered += continuation_suffix(page.next_cursor)
+        if (result_limit is None or len(rendered) <= result_limit) and (
+            budget is None or budget.fits(rendered)
+        ):
+            best = rendered
+            low = body_budget + 1
+        else:
+            high = body_budget - 1
+    if best is not None:
+        return best
     raise PageSizeError("Paged result metadata exceeds the configured result limit.")
 
 

@@ -41,6 +41,10 @@
           </svg>
           <span class="gauge-text"></span>
         </div>
+        <details id="context-budget" class="context-budget" hidden>
+          <summary>{{ t('budget.title') }} <span id="budget-usage"></span></summary>
+          <pre id="budget-details"></pre>
+        </details>
         <label for="model-select">{{ t('chat.model_label') }}</label>
         <select id="model-select">
           {% if models %}
@@ -165,6 +169,17 @@
                      aria-label="{{ t('settings.ollama.seed_value') }}" hidden />
             </div>
           </div>
+
+          <fieldset class="budget-settings">
+            <legend>{{ t('budget.title') }}</legend>
+            <p class="field-help">{{ t('budget.help') }}</p>
+            <div class="option-grid">
+              <label class="settings-field"><span>{{ t('budget.total_ratio') }}</span><input data-budget="total_ratio" type="number" min="0" max="100" step="any" required /></label>
+              <label class="settings-field"><span>{{ t('budget.per_result_ratio') }}</span><input data-budget="per_result_ratio" type="number" min="0" max="100" step="any" required /></label>
+              <label class="settings-field"><span>{{ t('budget.response_reserve_ratio') }}</span><input data-budget="response_reserve_ratio" type="number" min="0" max="100" step="any" required /></label>
+              <label class="settings-field"><span>{{ t('budget.safety_margin_ratio') }}</span><input data-budget="safety_margin_ratio" type="number" min="0" max="100" step="any" required /></label>
+            </div>
+          </fieldset>
 
           <details class="advanced-settings">
             <summary>{{ t('settings.ollama.advanced') }}</summary>

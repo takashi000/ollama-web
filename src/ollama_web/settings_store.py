@@ -9,6 +9,8 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
+from .context_budget import DEFAULT_RATIOS, validate_ratios
+
 NUM_CTX_VALUES = (4096, 8192, 16384, 32768, 65536, 131072, 262144)
 INTEGER_OPTIONS = {
     "num_ctx",
@@ -47,6 +49,7 @@ def default_app_settings(language: str = "ja") -> dict[str, Any]:
         language = "ja"
     return {
         "ui": {"language": language},
+        "tool_budget": dict(DEFAULT_RATIOS),
         "ollama": {
             "system_prompt": "",
             "options": {"temperature": 0.8, "num_ctx": 8192},
@@ -102,8 +105,8 @@ def validate_app_settings(raw: Any) -> dict[str, Any]:
     """Validate and normalize the settings API payload."""
     if not isinstance(raw, dict):
         raise SettingsValidationError("Settings must be an object")
-    _require_keys(raw, {"ui", "ollama"}, "settings")
-    if set(raw) != {"ui", "ollama"}:
+    _require_keys(raw, {"ui", "ollama", "tool_budget"}, "settings")
+    if not {"ui", "ollama"} <= set(raw):
         raise SettingsValidationError("Settings must contain ui and ollama")
 
     ui = raw["ui"]
@@ -126,8 +129,14 @@ def validate_app_settings(raw: Any) -> dict[str, Any]:
     if len(system_prompt) > 20_000:
         raise SettingsValidationError("ollama.system_prompt is too long")
 
+    try:
+        ratios = validate_ratios(raw.get("tool_budget", dict(DEFAULT_RATIOS)))
+    except ValueError as exc:
+        raise SettingsValidationError(str(exc)) from exc
+
     return {
         "ui": {"language": language},
+        "tool_budget": ratios,
         "ollama": {
             "system_prompt": system_prompt,
             "options": _validate_options(ollama["options"]),
