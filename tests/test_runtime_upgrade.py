@@ -180,6 +180,7 @@ def test_httpx_tls_accepts_trusted_ca_and_rejects_untrusted(tmp_path):
             pass
 
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
     context.load_cert_chain(cert_file, key_file)
     with HTTPServer(("127.0.0.1", 0), Handler) as server:
         server.socket = context.wrap_socket(server.socket, server_side=True)
