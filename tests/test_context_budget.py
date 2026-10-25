@@ -81,7 +81,7 @@ def test_remaining_budget_is_used_without_double_counting():
     messages = [Message(role="user", content="read")]
     initial = budget.available(messages, []).tokens
     assert initial == 500
-    # Leave 100 tokens in the total quota: execution remains possible below the per-call cap.
+    # Leave room below the tool cutoff; smaller results can still be retrieved.
     message = Message(role="tool", content="x" * 9800)
     messages.append(message)
     budget.add_result(message)
@@ -92,7 +92,7 @@ def test_remaining_budget_is_used_without_double_counting():
     assert budget.headroom(messages, []) == 10000 - budget.input_tokens(messages, []) - 2000
 
 
-def test_single_limit_applies_to_history_and_results_together():
+def test_tool_cutoff_counts_history_without_marking_retrieval_stopped():
     budget = ContextBudget(ModelContext.resolve("test", {}, {"num_ctx": 10000}))
     history = [Message(role="user", content="x" * 11000)]
     assert budget.input_limit == 8000
@@ -101,7 +101,7 @@ def test_single_limit_applies_to_history_and_results_together():
     budget.context_usage_limit = 0.5
     assert budget.input_limit == 5000
     assert budget.available(history, []).tokens == 0
-    assert budget.stop_reason == "context_headroom"
+    assert budget.stop_reason is None
     snapshot = budget.snapshot(history, [])
     assert snapshot["context_usage_limit"] == 0.5
     assert "ratios" not in snapshot
@@ -448,24 +448,166 @@ def test_metadata_skip_does_not_block_a_smaller_call_in_same_batch(monkeypatch):
     assert events[-1]["context_budget"]["stop_reason"] == "result_metadata_too_large"
 
 
-def test_no_network_generation_when_history_and_reserve_do_not_fit(monkeypatch):
+@pytest.mark.parametrize("cutoff", [0.2, 0.8])
+@pytest.mark.parametrize("num_predict", [128, 10000])
+def test_normal_answers_are_sent_above_tool_cutoff(monkeypatch, cutoff, num_predict):
     from ollama_web import llm
 
+    calls = []
+
     def chat(**kwargs):
-        pytest.fail("An overfull conversation must not be submitted")
+        calls.append(kwargs)
+        assert kwargs["tools"] == []
+        return [SimpleNamespace(message={"content": "normal answer"})]
 
     monkeypatch.setattr(llm, "get_client", lambda host=None: SimpleNamespace(chat=chat))
     events = list(
         llm.stream_chat_with_tools(
-            [Message(role="user", content="x" * 20000)],
+            [Message(role="user", content="x" * 14000)],
+            "test",
+            model_info={},
+            options={"num_ctx": 8192, "num_predict": num_predict},
+            language="en",
+            tool_settings={"context_usage_limit": cutoff},
+        )
+    )
+    assert len(calls) == 1
+    assert calls[0]["options"]["num_predict"] == num_predict
+    assert events[-1]["type"] == "done"
+    assert events[-1]["context_budget"]["input_tokens"] > int(8192 * cutoff)
+    assert events[-1]["context_budget"]["stop_reason"] is None
+    assert not any(
+        e["type"] in {"error", "status", "warning", "tool_start", "tool_end"} for e in events
+    )
+
+
+@pytest.mark.parametrize("offset", [-1, 0, 1])
+def test_tools_are_withdrawn_at_cutoff_without_blocking_answer(monkeypatch, offset):
+    from ollama._utils import convert_function_to_tool
+
+    from ollama_web import llm
+
+    registry = ToolRegistry()
+
+    def lookup() -> str:
+        pytest.fail("This response should not execute any tool")
+
+    registry.register(lookup)
+    schemas = [convert_function_to_tool(lookup).model_dump(exclude_none=True)]
+    budget = ContextBudget(ModelContext.resolve("test", {}, {"num_ctx": 10000}))
+    message = Message(role="user", content="")
+    initial = budget.input_tokens([message], schemas)
+    message.content = "x" * (2 * (8000 + offset - initial))
+    assert budget.input_tokens([message], schemas) == 8000 + offset
+    calls = []
+
+    def chat(**kwargs):
+        calls.append(kwargs)
+        assert bool(kwargs["tools"]) is (offset < 0)
+        # Even an answer that takes usage across the cutoff must not mark retrieval stopped.
+        return [SimpleNamespace(message={"content": "normal answer" * 30})]
+
+    monkeypatch.setattr(llm, "get_client", lambda host=None: SimpleNamespace(chat=chat))
+    events = list(
+        llm.stream_chat_with_tools(
+            [message],
+            "test",
+            capabilities={"tools"},
+            registry=registry,
+            model_info={},
+            options={"num_ctx": 10000},
+            language="en",
+        )
+    )
+    assert len(calls) == 1
+    assert events[-1]["type"] == "done"
+    assert events[-1]["context_budget"]["stop_reason"] == (
+        None if offset < 0 else "context_headroom"
+    )
+    assert not any(
+        e["type"] in {"error", "status", "warning", "tool_start", "tool_end"} for e in events
+    )
+
+
+def test_final_answer_is_sent_after_measured_usage_crosses_tool_cutoff(monkeypatch):
+    from ollama_web import llm
+
+    registry = ToolRegistry()
+    executed = []
+
+    def lookup(index: int) -> str:
+        executed.append(index)
+        return "retrieved evidence"
+
+    registry.register(lookup)
+
+    class Client:
+        calls = 0
+
+        def chat(self, **kwargs):
+            self.calls += 1
+            if self.calls <= 2:
+                response = SimpleNamespace(
+                    message={
+                        "tool_calls": [
+                            {
+                                "function": {
+                                    "name": "lookup",
+                                    "arguments": {"index": self.calls},
+                                }
+                            }
+                        ]
+                    }
+                )
+                if self.calls == 2:
+                    response.prompt_eval_count = 8500
+                    response.eval_count = 500
+                return [response]
+            assert self.calls == 3
+            assert kwargs["tools"] == []
+            assert any(m.role == "tool" and "not executed" in m.content for m in kwargs["messages"])
+            return [SimpleNamespace(message={"content": "final answer"})]
+
+    client = Client()
+    monkeypatch.setattr(llm, "get_client", lambda host=None: client)
+    events = list(
+        llm.stream_chat_with_tools(
+            [Message(role="user", content="research")],
+            "test",
+            registry=registry,
+            capabilities={"tools"},
+            model_info={},
+            options={"num_ctx": 10000},
+            language="en",
+        )
+    )
+    assert executed == [1]
+    assert client.calls == 3
+    assert events[-1]["type"] == "done"
+    assert events[-1]["context_budget"]["input_tokens"] > 8000
+    assert events[-1]["context_budget"]["stop_reason"] == "context_headroom"
+    assert not any(e["type"] == "error" for e in events)
+    assert [e["content"] for e in events if e["type"] == "delta"] == ["final answer"]
+
+
+def test_provider_error_above_tool_cutoff_is_not_replaced_by_app_budget_error(monkeypatch):
+    from ollama_web import llm
+
+    def chat(**kwargs):
+        raise RuntimeError("provider rejected input")
+
+    monkeypatch.setattr(llm, "get_client", lambda host=None: SimpleNamespace(chat=chat))
+    events = list(
+        llm.stream_chat_with_tools(
+            [Message(role="user", content="x" * 14000)],
             "test",
             model_info={},
             options={"num_ctx": 8192},
             language="en",
         )
     )
-    assert events[-1]["type"] == "error"
-    assert events[0]["stop_reason"] == "context_headroom"
+    assert events[-1] == {"type": "error", "message": "provider rejected input"}
+    assert events[0]["stop_reason"] is None
 
 
 @pytest.mark.parametrize("with_counts", [True, False])

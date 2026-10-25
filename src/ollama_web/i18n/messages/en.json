@@ -77,14 +77,13 @@
     "done": "Done",
     "connecting": "Connecting…",
     "disconnected": "Disconnected",
-    "tool_context_exhausted": "Retrieval finished to leave room for the answer. Preparing an answer from the available documents.",
+    "tool_context_exhausted": "Additional tool retrieval has finished. Preparing an answer from the available documents.",
     "pagination_incomplete": "The source still has unread content. The answer uses only the retrieved portion.",
     "thinking": "Thinking process",
     "executing_tool": "Executing {label}…",
     "running": "Running…",
     "empty_response": "The model returned an empty response. Please send the message again.",
-    "empty_response_retry": "Empty response received; retrying…",
-    "context_headroom": "There is insufficient context for this conversation and the response reserve. Start a new conversation or review the context setting."
+    "empty_response_retry": "Empty response received; retrying…"
   },
   "errors": {
     "generic": "An error occurred",
@@ -144,22 +143,23 @@
     },
     "tools": {
       "title": "Tool Settings",
-      "description": "Choose how much context to use for search and retrieved documents.",
-      "context_usage_limit": "Context usage limit",
-      "help": "Maximum context used by the conversation and retrieved documents. At 80%, the remaining 20% is kept for the answer. The amount retrieved per call is adjusted automatically."
+      "description": "Choose when to stop additional searches and document retrieval.",
+      "context_usage_limit": "Tool retrieval cutoff",
+      "help": "Additional tool retrieval stops as usage by the conversation and retrieved documents approaches this level. This setting does not limit ordinary answers. The amount retrieved per call is adjusted automatically."
     }
   },
   "budget": {
     "title": "Context usage (estimated)",
     "input": "In use",
-    "limit": "Usage limit",
+    "limit": "Tool retrieval cutoff",
     "capacity": "Model capacity",
     "reason": "Why retrieval stopped",
     "unit": "tokens",
     "reasons": {
-      "context_headroom": "Retrieval finished to leave room for the answer.",
+      "context_headroom": "Additional tool retrieval stopped at the retrieval cutoff.",
       "result_metadata_too_large": "There is not enough room for document continuation information.",
       "tool_total_limit": "Retrieval reached the limit in the previous settings."
-    }
+    },
+    "usage_title": "Context usage"
   }
 }

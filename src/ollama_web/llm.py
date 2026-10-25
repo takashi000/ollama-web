@@ -286,11 +286,12 @@ def stream_chat_with_tools(
         rounds += 1
         full_message: dict[str, Any] = {"role": "assistant", "content": "", "thinking": ""}
         tool_calls: list[dict[str, Any]] = []
+        if effective_tools and budget.headroom(messages, effective_tools) <= 0:
+            # The cutoff controls retrieval, not permission to generate an answer.
+            effective_tools = []
+            budget.stop_reason = "context_headroom"
         yield budget_event()
         sent_estimate = budget.input_tokens(messages, effective_tools)
-        if budget.headroom(messages, effective_tools) < 0:
-            yield {"type": "error", "message": t("status.context_headroom", lang=language)}
-            return
         logger.info("tool round %d start messages=%d model=%s", rounds, len(messages), model)
 
         t0 = time.time()
@@ -429,7 +430,7 @@ def stream_chat_with_tools(
             result_budget = budget.available(
                 messages, effective_tools, batch_reserve + envelope_cost
             )
-            skipped = budget_exhausted or result_budget.tokens <= 0
+            skipped = budget_exhausted or not effective_tools or result_budget.tokens <= 0
             metadata_skipped = (
                 not skipped
                 and is_builtin_paged
@@ -529,6 +530,7 @@ def stream_chat_with_tools(
         if msg is not None:
             followup_reserve += budget.message_tokens(msg)
         if budget.available(messages, effective_tools, followup_reserve).tokens <= 0:
+            budget.stop_reason = budget.stop_reason or "context_headroom"
             budget_exhausted = True
 
     logger.info("tool execution stopped reason=%s", budget.stop_reason)
@@ -551,10 +553,6 @@ def stream_chat_with_tools(
     )
     effective_tools = []
     yield budget_event()
-    if budget.headroom(messages, []) < 0:
-        budget.stop_reason = "context_headroom"
-        yield {"type": "error", "message": t("status.context_headroom", lang=language)}
-        return
     sent_estimate = budget.input_tokens(messages, [])
     t0 = time.time()
     try:

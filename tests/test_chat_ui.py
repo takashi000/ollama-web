@@ -33,9 +33,74 @@ def login(page, app):
     page.locator("#model-select option").first.wait_for(state="attached")
 
 
-@pytest.mark.parametrize(
-    "language,label", [("en", "Context usage (estimated)"), ("ja", "コンテキスト使用率（推定）")]
-)
+@pytest.mark.parametrize("language", ["ja", "en"])
+def test_context_usage_header_fits_mobile_and_desktop(tmp_path, browser_page, language):
+    from playwright.sync_api import expect
+
+    page = browser_page
+    model = "hf.co/example/a-model-with-a-very-long-name-for-layout-testing:cloud"
+    with running_app(tmp_path / "app", mode="budget", model=model) as app:
+        config = app.client.get("/api/settings").json()
+        config["ui"]["language"] = language
+        assert app.client.put("/api/settings", headers=app.headers, json=config).is_success
+        login(page, app)
+        widths = [320, 390, 520, 768, 1024, 1280]
+
+        def assert_fits():
+            for selector in (
+                "header",
+                ".controls",
+                "#model-select",
+                "#clear-btn",
+                "#token-gauge",
+                "#context-budget",
+                ".think-toggle",
+            ):
+                element = page.locator(selector)
+                if element.is_visible():
+                    box = element.bounding_box()
+                    assert box["x"] >= -1, (selector, box)
+                    assert box["x"] + box["width"] <= page.viewport_size["width"] + 1, (
+                        selector,
+                        box,
+                    )
+            assert page.locator("#model-select").bounding_box()["width"] >= 80
+            assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+
+        for width in widths:
+            page.set_viewport_size({"width": width, "height": 800})
+            assert_fits()
+        page.locator("#input").fill("hello")
+        page.locator("#send-btn").click()
+        expect(page.locator("#context-budget")).to_be_visible()
+        expect(page.locator("#chat")).to_contain_text("done")
+        expect(page.locator("#budget-usage, .budget-label")).to_have_count(0)
+        expect(page.locator("#token-gauge")).to_have_count(1)
+        for width in widths:
+            page.set_viewport_size({"width": width, "height": 800})
+            assert_fits()
+            summary = page.locator("#token-gauge")
+            expect(summary).to_have_accessible_name(re.compile(r".+: \d+%"))
+            expect(summary.locator(".gauge-text")).to_have_text(re.compile(r"^\d+%$"))
+            assert summary.bounding_box()["width"] >= 44
+            assert summary.bounding_box()["height"] >= 44
+            summary.click()
+            expect(page.locator("#budget-details")).to_be_visible()
+            box = page.locator("#budget-details").bounding_box()
+            assert box["x"] >= -1
+            assert box["x"] + box["width"] <= width + 1
+            summary.click()
+        summary.focus()
+        summary.press("Enter")
+        expect(page.locator("#budget-details")).to_be_visible()
+        summary.press("Enter")
+        expect(page.locator("#budget-details")).to_be_hidden()
+        page.set_viewport_size({"width": 390, "height": 800})
+        page.locator("#context-budget summary").click()
+        page.screenshot(path=str(tmp_path / "mobile-context-usage.png"), animations="disabled")
+
+
+@pytest.mark.parametrize("language,label", [("en", "Context usage"), ("ja", "コンテキスト使用率")])
 def test_dynamic_budget_settings_and_saved_display(tmp_path, browser_page, language, label):
     from playwright.sync_api import expect
 
@@ -51,6 +116,10 @@ def test_dynamic_budget_settings_and_saved_display(tmp_path, browser_page, langu
         expect(page.locator('[data-settings-screen="ollama"] input[type="range"]')).to_have_count(2)
         page.locator("#settings-back-btn").click()
         page.locator("#open-tools-settings").click()
+        cutoff_label = "ツール取得の停止ライン" if language == "ja" else "Tool retrieval cutoff"
+        expect(page.locator('label[for="settings-context-usage-limit"]')).to_contain_text(
+            cutoff_label,
+        )
         limit = page.locator("#settings-context-usage-limit")
         expect(limit).to_have_value("80")
         expect(page.locator('[data-settings-screen="tools"] input')).to_have_count(1)
@@ -72,10 +141,11 @@ def test_dynamic_budget_settings_and_saved_display(tmp_path, browser_page, langu
         page.locator("#send-btn").click()
         expect(page.locator("#chat")).to_contain_text("done")
         expect(page.locator("#context-budget")).to_be_visible()
-        expect(page.locator("#context-budget summary")).to_contain_text(label)
+        expect(page.locator("#token-gauge")).to_have_accessible_name(re.compile(re.escape(label)))
         page.locator("#context-budget summary").click()
         expect(page.locator("#budget-details")).to_contain_text("65,536")
         expect(page.locator("#budget-details")).to_contain_text("70%")
+        expect(page.locator("#budget-details")).to_contain_text(cutoff_label + ": 70%")
         expect(page.locator("#budget-details")).not_to_contain_text("20% / 10%")
         page.reload()
         page.locator("#session-list li").filter(has_text="hello").click()
@@ -87,6 +157,67 @@ def test_dynamic_budget_settings_and_saved_display(tmp_path, browser_page, langu
         session = app.client.get(f"/api/sessions/{session_list[0]['id']}").json()
         assert session["token_count"]["num_ctx"] == 65536
         assert session["token_count"]["requested_num_ctx"] == 8192
+
+
+def test_context_gauge_tap_and_legacy_token_counts(tmp_path, browser_page):
+    from playwright.sync_api import expect
+
+    context = browser_page.context.browser.new_context(
+        viewport={"width": 390, "height": 800},
+        has_touch=True,
+    )
+    try:
+        page = context.new_page()
+        with running_app(tmp_path / "app", mode="budget", model="fixture:cloud") as app:
+            login(page, app)
+            page.evaluate("updateContextBudget(null); updateTokenGauge(8192, 32768)")
+            gauge = page.locator("#token-gauge")
+            expect(gauge).to_have_text("25%")
+            expect(gauge).to_have_accessible_name("Context usage: 25%")
+            gauge.tap()
+            expect(page.locator("#budget-details")).to_be_visible()
+            expect(page.locator("#budget-details")).to_contain_text("8,192")
+            expect(page.locator("#budget-details")).to_contain_text("32,768")
+            gauge.tap()
+            expect(page.locator("#budget-details")).to_be_hidden()
+            page.evaluate("updateTokenGauge(32768, 32768)")
+            expect(gauge).to_have_text("100%")
+            page.evaluate("updateTokenGauge(0, 0)")
+            expect(page.locator("#context-budget")).to_be_hidden()
+    finally:
+        context.close()
+
+
+@pytest.mark.parametrize("language", ["ja", "en"])
+def test_normal_chat_continues_above_tool_cutoff_in_browser(tmp_path, browser_page, language):
+    from playwright.sync_api import expect
+
+    page = browser_page
+    with running_app(tmp_path / "app", mode="budget", model="fixture:cloud") as app:
+        config = app.client.get("/api/settings").json()
+        config["ui"]["language"] = language
+        config["tools"]["context_usage_limit"] = 0.01
+        assert app.client.put("/api/settings", headers=app.headers, json=config).is_success
+        page.set_viewport_size({"width": 390, "height": 800})
+        login(page, app)
+        for index, message in enumerate(("first normal question", "second normal question")):
+            page.locator("#input").fill(message)
+            page.locator("#send-btn").click()
+            expect(page.locator(".message.assistant .body")).to_have_text(["done"] * (index + 1))
+            expect(page.locator("#cancel-btn")).to_be_disabled()
+        expect(page.locator(".message.assistant .body")).to_have_text(["done", "done"])
+        expect(page.locator(".warning-msg")).to_have_count(0)
+        assert len(app.requests) == 2
+        assert all(not request.get("tools") for request in app.requests)
+        sessions = app.client.get("/api/sessions").json()["sessions"]
+        saved = app.client.get(f"/api/sessions/{sessions[0]['id']}").json()
+        assert [m["content"] for m in saved["messages"] if m["role"] == "assistant"] == [
+            "done",
+            "done",
+        ]
+        page.locator("#token-gauge").click()
+        label = "ツール取得の停止ライン" if language == "ja" else "Tool retrieval cutoff"
+        expect(page.locator("#budget-details")).to_contain_text(label + ": 1%")
 
 
 @pytest.mark.parametrize(

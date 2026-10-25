@@ -257,10 +257,10 @@ mypy src/
 This repository keeps pytest, ruff, and mypy configurations in `pyproject.toml`.
 
 Tool calls have no fixed count, round, or character limit. Built-in and MCP tools share a
-context usage limit (80% by default), configurable under General Settings → Tool Settings.
-This single limit covers the conversation and retrieved documents together; the remaining
-context is kept for the answer. Per-call result sizes are adjusted automatically and
-Ollama measurements correct usage estimates.
+tool retrieval cutoff (80% by default), configurable under General Settings → Tool Settings.
+The cutoff checks full input usage to stop additional retrieval; it never blocks ordinary
+answers or the final answer after retrieval stops. Per-call result sizes are adjusted
+automatically and Ollama measurements correct usage estimates.
 See [dynamic context budgets](docs/context-budget.md) for capacity resolution and limitations.
 Stop aborts the existing chat connection and ends its local worker and owned
 stdio processes. Work already accepted by an external server may continue.

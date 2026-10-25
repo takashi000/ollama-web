@@ -175,6 +175,7 @@ class ContextBudget:
 
     @property
     def input_limit(self) -> int:
+        """Tool retrieval cutoff; this must never gate ordinary model generation."""
         return min(
             math.floor(self.context.capacity * self.context_usage_limit),
             self.context.capacity - (self.num_predict or 0),
@@ -201,8 +202,6 @@ class ContextBudget:
         # Size individual pages automatically so one source cannot fill the context at once.
         page_size = max(1, self.context.capacity // 20)
         tokens = max(0, min(page_size, headroom))
-        if headroom <= 0:
-            self.stop_reason = "context_headroom"
         return ResultBudget(tokens, self.factor)
 
     def add_result(self, message: Any) -> None:

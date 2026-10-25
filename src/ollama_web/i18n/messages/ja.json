@@ -77,14 +77,13 @@
     "done": "完了",
     "connecting": "接続中...",
     "disconnected": "切断しました",
-    "tool_context_exhausted": "回答用の容量を残して情報の取得を終了し、取得済みの資料から回答を作成します。",
+    "tool_context_exhausted": "ツールの追加取得を終了し、取得済みの資料から回答を作成します。",
     "pagination_incomplete": "資料に未取得部分があります。取得済み範囲のみで回答します。",
     "thinking": "思考プロセス",
     "executing_tool": "{label} を実行中…",
     "running": "実行中…",
     "empty_response": "モデルから空の応答が返されました。もう一度送信してください。",
-    "empty_response_retry": "応答が空でした。リトライ中…",
-    "context_headroom": "会話と回答用の容量を確保できません。新しい会話を始めるか、コンテキスト設定を見直してください。"
+    "empty_response_retry": "応答が空でした。リトライ中…"
   },
   "errors": {
     "generic": "エラーが発生しました",
@@ -144,22 +143,23 @@
     },
     "tools": {
       "title": "ツール設定",
-      "description": "検索や資料の取得に使う容量を調整します。",
-      "context_usage_limit": "コンテキスト使用率の上限",
-      "help": "会話と取得した資料に使う容量の上限です。80%なら、残り20%を回答のために残します。1回の取得量は自動で調整します。"
+      "description": "検索や資料の追加取得を止める目安を調整します。",
+      "context_usage_limit": "ツール取得の停止ライン",
+      "help": "会話と取得した資料の使用率がこの値に近づくと、追加のツール取得を停止します。通常の回答はこの設定では制限しません。1回の取得量は自動で調整します。"
     }
   },
   "budget": {
     "title": "コンテキスト使用率（推定）",
     "input": "使用中",
-    "limit": "使用率の上限",
+    "limit": "ツール取得の停止ライン",
     "capacity": "モデルの容量",
     "reason": "取得を終了した理由",
     "unit": "トークン",
     "reasons": {
-      "context_headroom": "回答用の容量を残して、情報の取得を終了しました。",
+      "context_headroom": "ツール取得の停止ラインに達したため、追加取得を停止しました。",
       "result_metadata_too_large": "資料の続きの情報を収める容量がありません。",
       "tool_total_limit": "情報の取得量が以前の設定の上限に達しました。"
-    }
+    },
+    "usage_title": "コンテキスト使用率"
   }
 }

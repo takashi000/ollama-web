@@ -1035,49 +1035,58 @@ cancelBtn.addEventListener("click", () => {
   }
 });
 
+let displayedContextBudget = null;
+
 function updateContextBudget(budget) {
   const panel = document.getElementById("context-budget");
   if (!panel) return;
-  panel.hidden = !budget;
-  if (!budget) return;
-  const fmt = (n) => Number(n || 0).toLocaleString();
-  const limit = budget.input_limit ?? budget.effective_context -
-    (budget.response_reserve || 0) - (budget.safety_margin || 0);
-  const usageLimit = budget.context_usage_limit ?? limit / budget.effective_context;
-  document.getElementById("budget-usage").textContent =
-    `${Math.round(budget.input_tokens / budget.effective_context * 100)}%`;
-  const rows = [
-    [t("budget.input"), `${fmt(budget.input_tokens)} ${t("budget.unit")}`],
-    [t("budget.limit"), `${Math.round(usageLimit * 100)}%`],
-    [t("budget.capacity"), `${fmt(budget.effective_context)} ${t("budget.unit")}`],
-  ];
-  if (budget.stop_reason) rows.push([t("budget.reason"), t(`budget.reasons.${budget.stop_reason}`)]);
-  document.getElementById("budget-details").textContent = rows.map(([key, value]) => `${key}: ${value}`).join("\n");
-  updateTokenGauge(budget.input_tokens, budget.effective_context);
-  const gauge = document.getElementById("token-gauge");
-  if (gauge) gauge.title = t("budget.input");
+  displayedContextBudget = budget || null;
+  if (!budget) {
+    panel.hidden = true;
+    panel.open = false;
+    return;
+  }
+  updateTokenGauge(budget.input_tokens, budget.effective_context, true);
 }
 
-function updateTokenGauge(promptEvalCount, numCtx) {
+function updateTokenGauge(promptEvalCount, numCtx, estimated = false) {
+  const panel = document.getElementById("context-budget");
   const gaugeEl = document.getElementById("token-gauge");
   const textEl = gaugeEl ? gaugeEl.querySelector(".gauge-text") : null;
   const fgEl = gaugeEl ? gaugeEl.querySelector(".gauge-fg") : null;
-  if (!gaugeEl || !textEl || !fgEl) return;
+  if (!panel || !gaugeEl || !textEl || !fgEl) return;
 
   if (!numCtx) {
-    gaugeEl.style.display = "none";
+    panel.hidden = true;
+    panel.open = false;
     return;
   }
-  gaugeEl.style.display = "";
-  gaugeEl.title = `${t("chat.token_count")}: ${promptEvalCount} / ${numCtx}`;
-
+  panel.hidden = false;
   const ratio = Math.min(Math.max(promptEvalCount / numCtx, 0), 1);
+  const percent = `${Math.round(ratio * 100)}%`;
+  const title = t(estimated ? "budget.title" : "budget.usage_title");
+  gaugeEl.title = `${title}: ${percent}`;
+  gaugeEl.setAttribute("aria-label", gaugeEl.title);
+  textEl.textContent = percent;
   const dash = ratio * 100;
-  const gap = 100 - dash;
-  fgEl.style.strokeDasharray = `${dash} ${gap}`;
+  fgEl.style.strokeDasharray = `${dash} ${100 - dash}`;
   fgEl.style.strokeDashoffset = "0";
 
-  textEl.textContent = (promptEvalCount / 1000).toFixed(1) + "k";
+  const fmt = (n) => Number(n || 0).toLocaleString();
+  const rows = [
+    [t("budget.input"), `${fmt(promptEvalCount)} ${t("budget.unit")}`],
+    [t("budget.capacity"), `${fmt(numCtx)} ${t("budget.unit")}`],
+  ];
+  const budget = displayedContextBudget;
+  if (budget) {
+    const limit = budget.input_limit ?? budget.effective_context -
+      (budget.response_reserve || 0) - (budget.safety_margin || 0);
+    const usageLimit = budget.context_usage_limit ?? limit / budget.effective_context;
+    rows.splice(1, 0, [t("budget.limit"), `${Math.round(usageLimit * 100)}%`]);
+    if (budget.stop_reason) rows.push([t("budget.reason"), t(`budget.reasons.${budget.stop_reason}`)]);
+  }
+  document.getElementById("budget-details").textContent =
+    rows.map(([key, value]) => `${key}: ${value}`).join("\n");
 
   if (ratio >= 0.8) {
     fgEl.style.stroke = "var(--danger)";
