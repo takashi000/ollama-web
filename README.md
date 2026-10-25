@@ -261,7 +261,7 @@ tool retrieval cutoff (80% by default), configurable under General Settings → 
 The cutoff checks full input usage to stop additional retrieval; it never blocks ordinary
 answers or the final answer after retrieval stops. Per-call result sizes are adjusted
 automatically and Ollama measurements correct usage estimates.
-See [dynamic context budgets](docs/context-budget.md) for capacity resolution and limitations.
+See [tool retrieval cutoff](docs/tools-schema.md#ツール取得の停止ラインと設定) for capacity resolution and limitations.
 Stop aborts the existing chat connection and ends its local worker and owned
 stdio processes. Work already accepted by an external server may continue.
 See [tool result handling](docs/tools-schema.md) for details.
