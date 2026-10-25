@@ -62,6 +62,7 @@ Python 3.15正式版で`uv sync --locked --extra dev --no-build --no-install-pro
 | 不正画像・上限 | 壊れた入力・ピクセル上限時の既存fallbackを明示的に検証 | 挙動維持。例外捕捉をネイティブ脆弱性対策と扱わずPillowを更新 |
 | PDF | 既存の正常PDF・添付プレビュー・ページ内外継続・旧トークンのテストを維持。欠損PDFと異常xrefを子プロセス・10秒上限で追加検証 | 高負荷/コード実行PoCは実行せず、有限時間の処理終了を確認 |
 | MCP/asyncio・型情報 | stdioで日本語echo、HTTPの列挙/呼出し/DELETE/クライアント解放、キャンセル時解放。FastMCPでschema生成を実行 | `asyncio.run()`を維持。Pydantic更新後も実利用経路で検証 |
+| Windowsの終了判定 | 初回CIの通常pip構成で、キャンセル直後のプロセス終了判定が競合 | Windows APIの非同期終了を最大5秒待って検証。PID通知も一時ファイルからの置換とし、未書込みファイルの読取を防止 |
 | TLS | ローカル生成証明書で信頼CA指定時の成功・既定ストアでの拒否 | certifi更新後も証明書検証を維持。外部サイトは自動テスト条件にしない |
 | テスト用TLSサーバ | PRのCodeQLで許容TLS版の指摘が発生 | テスト用SSLContextの最低版をTLS 1.2と明示。指摘を抑制せず修正 |
 | 日本語・永続化 | 更新前形式の会話を再読込、CP932添付をAPI経由で保存・再読込、設定・MCP JSON往復 | データ移行不要。UTF-8明示とCP932 fallbackを維持 |

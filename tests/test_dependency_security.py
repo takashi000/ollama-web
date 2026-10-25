@@ -33,7 +33,9 @@ def _assert_child_exited(pid: int) -> None:
         handle = kernel.OpenProcess(0x00100000, False, pid)  # SYNCHRONIZE
         if handle:
             try:
-                assert kernel.WaitForSingleObject(handle, 0) == 0, f"MCP child {pid} still runs"
+                # TerminateProcess is asynchronous on Windows: wait for the
+                # process object to signal instead of racing kernel teardown.
+                assert kernel.WaitForSingleObject(handle, 5000) == 0, f"MCP child {pid} still runs"
             finally:
                 kernel.CloseHandle(handle)
         else:
@@ -112,7 +114,9 @@ def test_mcp_stdio_cancellation_terminates_child(tmp_path: Path):
     script = tmp_path / "waiting_server.py"
     script.write_text(
         "import os, sys, time\nfrom pathlib import Path\n"
-        "Path(sys.argv[1]).write_text(str(os.getpid()), encoding='utf-8')\n"
+        "ready = Path(sys.argv[1])\n"
+        "ready.with_suffix('.tmp').write_text(str(os.getpid()), encoding='utf-8')\n"
+        "ready.with_suffix('.tmp').replace(ready)\n"
         "time.sleep(60)\n",
         encoding="utf-8",
     )
