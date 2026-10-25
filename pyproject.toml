@@ -9,12 +9,11 @@ description = "Ollama web project"
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE", "THIRD_PARTY_LICENSES.txt"]
-requires-python = ">=3.10"
+requires-python = ">=3.14"
 classifiers = [
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.14",
+    "Programming Language :: Python :: 3.15",
 ]
 dependencies = [
     "ollama>=0.6.2",
@@ -24,14 +23,15 @@ dependencies = [
     "httpx>=0.27",
     "beautifulsoup4>=4.12",
     "jinja2>=3.1",
-    "pypdf>=6.19.0,<7",
+    "pypdf>=6.21.2,<7",
     "python-multipart>=0.0.9",
-    "Pillow>=10.0",
+    "Pillow>=13.0.0,<14",
     "mcp>=1.30.0,<2",
     # Security floors also apply to installations that do not use uv.lock.
     "anyio>=4.14.2,<5",
     "PyJWT>=2.15.1,<3",
     "soupsieve>=2.9.0,<3",
+    "certifi>=2026.10.19",
 ]
 
 [project.optional-dependencies]
@@ -65,7 +65,7 @@ ollama_web = [
 
 [tool.ruff]
 line-length = 100
-target-version = "py310"
+target-version = "py314"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
@@ -78,5 +78,5 @@ filterwarnings = [
 ]
 
 [tool.mypy]
-python_version = "3.10"
+python_version = "3.14"
 strict = true
