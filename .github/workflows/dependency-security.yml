@@ -18,7 +18,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
-        python: ['3.10', '3.11', '3.12']
+        python: ['3.14', '3.15']
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
@@ -28,16 +28,20 @@ jobs:
         with:
           version: '0.11.23'
       - name: Install locked dependencies
-        run: uv sync --locked --extra dev --python ${{ matrix.python }}
+        run: uv sync --locked --extra dev --python ${{ matrix.python }} --no-build --no-install-project
+      - name: Install application
+        run: uv pip install --no-deps -e .
       - name: Check dependency consistency
         run: uv pip check
+      - name: Import native dependencies
+        run: uv run --locked python -c "import PIL._imaging, pydantic_core, cryptography, _cffi_backend, lxml.etree, primp"
       - name: Test locked installation
         run: uv run --locked pytest -q
       - name: Lint
-        run: uv run --locked ruff check src tests scripts/check_wheel_install.py
+        run: uv run --locked ruff check src tests scripts/check_wheel_install.py scripts/check_dependabot_resolution.py
       - name: Type check
         run: uv run --locked mypy src/
-      - name: Build wheel
-        run: uv build --wheel
+      - name: Build distributions
+        run: uv build --out-dir dist/security-validation
       - name: Test ordinary pip wheel installation
         run: uv run --locked python scripts/check_wheel_install.py

@@ -9,12 +9,18 @@
 
 ### Changed
 
+- Pythonの最低要件を3.14へ引き上げ、Windows/Linux × CPython 3.14・3.15をCI対象にしました。3.13以前の仮想環境は再作成が必要です。
+- Python 3.15用wheelのためcffi・librt・lxml・MarkupSafe・Pydantic/coreと必要なtyping-inspectionを更新しました。保存データ・HTTP APIの形式は変更していません。
 - ddgs の最低バージョンとロックファイルを 9.16.0 へ更新しました。検索バックエンドは引き続き auto を使用します。
 - Web検索の地域をクエリから内部選択し、`OLLAMA_WEB_SEARCH_REGION` で auto・米国・日本を切り替えられるようにしました。LLM向け引数は変更していません。
 
 ### Fixed
 
 - Web検索の空・URL形式タイトルを欠損として扱い、無効URLとYahoo包装解除後の既知Bing広告リンクを除外するようにしました。検索失敗は引き続きツールエラーとして伝えます。
+
+### Security
+
+- Pillowを13.0.0、pypdfを6.21.2、certifiを2026.10.23へ更新しました。セキュリティ下限を通常pipインストールにも適用し、画像・PDF・TLS・MCP・CLIの回帰と配布物検証を追加しました。
 
 ## [0.5.4] - 2026-09-14
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import sys
 from pathlib import Path
 
@@ -19,6 +20,29 @@ from ollama_web.mcp import (
 )
 
 _KEY = "dependency-regression-test-secret-at-least-32-bytes"
+
+
+def _assert_child_exited(pid: int) -> None:
+    if os.name == "nt":
+        import ctypes
+
+        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel.OpenProcess.restype = ctypes.c_void_p
+        kernel.WaitForSingleObject.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
+        kernel.CloseHandle.argtypes = [ctypes.c_void_p]
+        handle = kernel.OpenProcess(0x00100000, False, pid)  # SYNCHRONIZE
+        if handle:
+            try:
+                # TerminateProcess is asynchronous on Windows: wait for the
+                # process object to signal instead of racing kernel teardown.
+                assert kernel.WaitForSingleObject(handle, 5000) == 0, f"MCP child {pid} still runs"
+            finally:
+                kernel.CloseHandle(handle)
+        else:
+            assert ctypes.get_last_error() == 87  # ERROR_INVALID_PARAMETER: no process
+    else:
+        with pytest.raises(ProcessLookupError):
+            os.kill(pid, 0)
 
 
 @pytest.mark.parametrize("method", ["decode", "decode_complete"])
@@ -55,8 +79,13 @@ def test_pyjwt_preserves_options_and_rejects_invalid_claims(method, claims, erro
 
 def test_mcp_stdio_lists_calls_and_closes(tmp_path: Path):
     server_script = tmp_path / "mcp_server.py"
+    pid_log = tmp_path / "children.txt"
     server_script.write_text(
+        "import os, sys\n"
+        "from pathlib import Path\n"
         "from mcp.server.fastmcp import FastMCP\n"
+        "with Path(sys.argv[1]).open('a', encoding='utf-8') as log:\n"
+        "    log.write(str(os.getpid()) + '\\n')\n"
         "server = FastMCP('dependency-test')\n"
         "@server.tool()\n"
         "def echo(text: str) -> str:\n"
@@ -64,16 +93,75 @@ def test_mcp_stdio_lists_calls_and_closes(tmp_path: Path):
         "server.run(transport='stdio')\n",
         encoding="utf-8",
     )
-    config = {"command": sys.executable, "args": [str(server_script)]}
+    config = {"command": sys.executable, "args": [str(server_script), str(pid_log)]}
 
     async def exercise():
         tools = await _list_tools_stdio("test", config)
         assert any(tool["function"]["name"] == "mcp__test__echo" for tool in tools)
-        result = await _call_tool_stdio("test", config, "echo", {"text": "stdio-ok"})
-        assert "stdio-ok" in result.text
+        result = await _call_tool_stdio("test", config, "echo", {"text": "stdio-ok-日本語"})
+        assert "stdio-ok-日本語" in result.text
 
     # Returning from both SDK context managers includes child-process cleanup.
     asyncio.run(asyncio.wait_for(exercise(), timeout=30))
+    pids = pid_log.read_text(encoding="utf-8").splitlines()
+    assert len(pids) == 2
+    for pid in pids:
+        _assert_child_exited(int(pid))
+
+
+def test_mcp_stdio_cancellation_terminates_child(tmp_path: Path):
+    pid_file = tmp_path / "child.pid"
+    script = tmp_path / "waiting_server.py"
+    script.write_text(
+        "import os, sys, time\nfrom pathlib import Path\n"
+        "ready = Path(sys.argv[1])\n"
+        "ready.with_suffix('.tmp').write_text(str(os.getpid()), encoding='utf-8')\n"
+        "ready.with_suffix('.tmp').replace(ready)\n"
+        "time.sleep(60)\n",
+        encoding="utf-8",
+    )
+
+    async def exercise():
+        config = {"command": sys.executable, "args": [str(script), str(pid_file)]}
+        task = asyncio.create_task(
+            _list_tools_stdio("test", config)
+        )
+        try:
+            while not pid_file.exists():
+                await asyncio.sleep(0.05)
+        finally:
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+
+    asyncio.run(asyncio.wait_for(exercise(), timeout=10))
+    _assert_child_exited(int(pid_file.read_text(encoding="utf-8")))
+
+
+def test_mcp_http_cancellation_closes_client(monkeypatch):
+    original_client = httpx.AsyncClient
+    clients: list[httpx.AsyncClient] = []
+    started = asyncio.Event()
+
+    async def handle(request):
+        started.set()
+        await asyncio.Event().wait()
+
+    def make_client(**kwargs):
+        client = original_client(transport=httpx.MockTransport(handle), **kwargs)
+        clients.append(client)
+        return client
+
+    async def exercise():
+        monkeypatch.setattr(httpx, "AsyncClient", make_client)
+        task = asyncio.create_task(_list_tools_http("test", {"url": "http://localhost/mcp"}))
+        await asyncio.wait_for(started.wait(), timeout=5)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert clients and all(client.is_closed for client in clients)
+
+    asyncio.run(asyncio.wait_for(exercise(), timeout=10))
 
 
 def test_mcp_http_lists_calls_and_terminates_sessions(monkeypatch):
