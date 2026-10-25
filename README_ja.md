@@ -19,7 +19,7 @@ Docker や仮想マシンを必要とせず、ホスト OS 上で直接起動し
 
 ## Requirements
 
-- Python 3.10+
+- Python 3.14以上（標準CPython。Windows/Linux × 3.14・3.15で検証）
 - Ollama が起動していること
 - `uv` 推奨
 
@@ -28,7 +28,7 @@ Docker や仮想マシンを必要とせず、ホスト OS 上で直接起動し
 ## Installation
 
 ```bash
-uv venv .venv
+uv venv --python 3.14 .venv
 uv pip install -e ".[dev]" -p .venv
 ```
 
@@ -38,6 +38,26 @@ uv pip install -e ".[dev]" -p .venv
 uv venv .venv
 uv pip install -e . -p .venv
 ```
+
+### Python 3.13以前からの移行
+
+アプリを停止し、`OLLAMA_WEB_DATA_DIR`のディレクトリ（既定は`data`）を
+会話・添付・`settings.json`・`mcpServers.json`ごとバックアップしてください。
+PIN・秘密鍵などの環境変数も引き継ぎます。以前の仮想環境は流用せず、新しく作成します。
+
+```bash
+uv venv --python 3.14 .venv-314
+uv pip install -e . --python .venv-314
+uv run --python .venv-314 --no-project ollama-web
+```
+
+Python 3.15でも同じ手順で移行できます。データ形式の変更はないため、
+`OLLAMA_WEB_DATA_DIR`は既存データを指すようにしてください。
+MCPが以前の仮想環境のPythonを使っている場合は、`command`の絶対パスと
+`OLLAMA_WEB_MCP_STDIO_ALLOWLIST`を両方更新します。
+再起動後にログイン、会話再読込、添付、ストリーミング、MCP呼出しを確認してください。
+旧リリースへ戻すと脆弱な依存も戻るため、更新済み環境での修正を優先します。
+詳細は[互換性・検証記録](docs/python314-security-validation.md)を参照してください。
 
 ## Usage
 

@@ -19,7 +19,7 @@ Use Ollama from your browser with streaming chat, web search and URL fetching, i
 
 ## Requirements
 
-- Python 3.10+
+- Python 3.14+ (standard CPython; Windows/Linux tested on 3.14 and 3.15)
 - Ollama must be running
 - `uv` recommended
 
@@ -28,16 +28,37 @@ By default, the Ollama API is accessed at `http://127.0.0.1:11434`.
 ## Installation
 
 ```bash
-uv venv .venv
+uv venv --python 3.14 .venv
 uv pip install -e ".[dev]" -p .venv
 ```
 
 To install only production dependencies:
 
 ```bash
-uv venv .venv
+uv venv --python 3.14 .venv
 uv pip install -e . -p .venv
 ```
+
+### Upgrading from Python 3.13 or earlier
+
+Stop the application and back up the directory selected by `OLLAMA_WEB_DATA_DIR`
+(default: `data`), including conversations, attachments, `settings.json`, and
+`mcpServers.json`. Keep your PIN/secret and other environment settings.
+Create a fresh environment instead of reusing the old one:
+
+```bash
+uv venv --python 3.14 .venv-314
+uv pip install -e . --python .venv-314
+uv run --python .venv-314 --no-project ollama-web
+```
+
+Python 3.15 can be used in the same way. Keep `OLLAMA_WEB_DATA_DIR` pointing to
+the backed-up existing data; no data format migration is needed. If an MCP server
+uses the previous environment's Python, update both its absolute `command` path
+and `OLLAMA_WEB_MCP_STDIO_ALLOWLIST`. Check login, conversation reload, attachments,
+streaming chat, and MCP calls after restarting. Switching back to an old release
+also restores its vulnerable dependencies; prefer fixing the updated environment.
+See the [compatibility and validation report](docs/python314-security-validation.md).
 
 ## Usage
 
