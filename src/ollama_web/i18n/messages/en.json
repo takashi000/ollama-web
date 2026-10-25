@@ -77,7 +77,7 @@
     "done": "Done",
     "connecting": "Connecting…",
     "disconnected": "Disconnected",
-    "tool_context_exhausted": "Tool result budget exhausted. Summarizing available information…",
+    "tool_context_exhausted": "Retrieval finished to leave room for the answer. Preparing an answer from the available documents.",
     "pagination_incomplete": "The source still has unread content. The answer uses only the retrieved portion.",
     "thinking": "Thinking process",
     "executing_tool": "Executing {label}…",
@@ -141,39 +141,25 @@
       "saved": "Settings saved.",
       "invalid_integer": "Enter an integer.",
       "invalid_number": "Enter a number."
+    },
+    "tools": {
+      "title": "Tool Settings",
+      "description": "Choose how much context to use for search and retrieved documents.",
+      "context_usage_limit": "Context usage limit",
+      "help": "Maximum context used by the conversation and retrieved documents. At 80%, the remaining 20% is kept for the answer. The amount retrieved per call is adjusted automatically."
     }
   },
   "budget": {
-    "title": "Tool budget (estimated)",
-    "used": "Used / total result limit",
-    "input": "Estimated full input",
-    "capacity": "Effective context",
-    "requested": "Requested context",
-    "next": "Available for next result",
-    "reserve": "Response and thinking reserve",
-    "safety": "Safety margin",
-    "source": "Capacity source",
-    "ratios": "Total / per result / response / safety",
-    "reason": "Stop reason",
+    "title": "Context usage (estimated)",
+    "input": "In use",
+    "limit": "Usage limit",
+    "capacity": "Model capacity",
+    "reason": "Why retrieval stopped",
     "unit": "tokens",
-    "sources": {
-      "model": "Model metadata",
-      "requested": "Request settings",
-      "runtime": "Runtime allocation",
-      "fallback": "Fallback"
-    },
     "reasons": {
-      "tool_total_limit": "Total tool result limit",
-      "context_headroom": "Insufficient context headroom",
-      "result_metadata_too_large": "Page metadata does not fit"
-    },
-    "capacity_estimated": "Capacity is estimated",
-    "capacity_reported": "Using reported capacity",
-    "help": "Percentages of the effective context. Usage is estimated and corrected using Ollama measurements.",
-    "total_ratio": "Total tool result budget (%)",
-    "per_result_ratio": "Per-result budget (%)",
-    "response_reserve_ratio": "Response and thinking reserve (%)",
-    "safety_margin_ratio": "Safety margin (%)",
-    "invalid": "Ratios must be positive; per-result must not exceed total; total + response + safety must be below 100%."
+      "context_headroom": "Retrieval finished to leave room for the answer.",
+      "result_metadata_too_large": "There is not enough room for document continuation information.",
+      "tool_total_limit": "Retrieval reached the limit in the previous settings."
+    }
   }
 }

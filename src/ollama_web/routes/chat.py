@@ -480,7 +480,7 @@ async def _chat_event_stream(
             options=ollama_options,
             language=language,
             model_info=model_info,
-            budget_options=app_settings["tool_budget"],
+            tool_settings=app_settings["tools"],
         ):
             if event.get("type") == "done":
                 event.setdefault("num_ctx", num_ctx)

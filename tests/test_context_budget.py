@@ -7,12 +7,12 @@ import pytest
 from ollama import Image, Message, ShowResponse
 
 from ollama_web.context_budget import (
-    DEFAULT_RATIOS,
+    DEFAULT_TOOL_SETTINGS,
     ContextBudget,
     ModelContext,
     ResultBudget,
     current_result_budget,
-    validate_ratios,
+    validate_tool_settings,
 )
 from ollama_web.settings_store import load_app_settings, save_app_settings
 from ollama_web.tools.helper.pagination import (
@@ -70,23 +70,10 @@ def test_cloud_does_not_use_local_runtime():
     assert budget.context.capacity == 131072
 
 
-@pytest.mark.parametrize(
-    "changes",
-    [
-        {"total_ratio": 0},
-        {"per_result_ratio": -1},
-        {"total_ratio": True},
-        {"total_ratio": float("nan")},
-        {"total_ratio": float("inf")},
-        {"per_result_ratio": 0.6},
-        {"response_reserve_ratio": 0.4},
-        {"total_ratio": 0.7},
-        {"unknown": 0.1},
-    ],
-)
-def test_invalid_ratios(changes):
+@pytest.mark.parametrize("value", [0, -1, 1, 1.1, True, "0.8", None, float("nan"), float("inf")])
+def test_invalid_usage_limit(value):
     with pytest.raises(ValueError):
-        validate_ratios({**DEFAULT_RATIOS, **changes})
+        validate_tool_settings({"context_usage_limit": value})
 
 
 def test_remaining_budget_is_used_without_double_counting():
@@ -99,8 +86,26 @@ def test_remaining_budget_is_used_without_double_counting():
     messages.append(message)
     budget.add_result(message)
     assert budget.used == 4900
+    budget.observed_floor = budget.input_limit - 132
+    budget.observed_tail = 0
     assert budget.available(messages, []).tokens == 100
-    assert budget.headroom(messages, []) == 10000 - budget.input_tokens(messages, []) - 3000
+    assert budget.headroom(messages, []) == 10000 - budget.input_tokens(messages, []) - 2000
+
+
+def test_single_limit_applies_to_history_and_results_together():
+    budget = ContextBudget(ModelContext.resolve("test", {}, {"num_ctx": 10000}))
+    history = [Message(role="user", content="x" * 11000)]
+    assert budget.input_limit == 8000
+    assert budget.available(history, []).tokens > 0
+    assert budget.used == 0
+    budget.context_usage_limit = 0.5
+    assert budget.input_limit == 5000
+    assert budget.available(history, []).tokens == 0
+    assert budget.stop_reason == "context_headroom"
+    snapshot = budget.snapshot(history, [])
+    assert snapshot["context_usage_limit"] == 0.5
+    assert "ratios" not in snapshot
+    assert "safety_margin" not in snapshot
 
 
 @pytest.mark.parametrize(
@@ -268,9 +273,51 @@ def test_old_settings_preserve_options_when_budget_is_missing(tmp_path):
         },
     }
     saved = save_app_settings(tmp_path, old)
-    assert saved["tool_budget"] == DEFAULT_RATIOS
+    assert saved["tools"] == DEFAULT_TOOL_SETTINGS
     assert saved["ollama"] == old["ollama"]
     assert load_app_settings(tmp_path) == saved
+
+
+@pytest.mark.parametrize("reserve,expected", [(0.2, 0.8), (0.3, 0.7)])
+def test_old_four_ratio_settings_migrate_without_resetting_ollama(tmp_path, reserve, expected):
+    import json
+
+    old = {
+        "ui": {"language": "ja"},
+        "ollama": {
+            "system_prompt": "keep this",
+            "options": {"temperature": 1.2, "num_ctx": 131072},
+        },
+        "tool_budget": {
+            "total_ratio": 0.5,
+            "per_result_ratio": 0.05,
+            "response_reserve_ratio": reserve,
+            "safety_margin_ratio": 0.1,
+        },
+    }
+    path = tmp_path / "settings.json"
+    path.write_text(json.dumps(old), encoding="utf-8")
+    loaded = load_app_settings(tmp_path)
+    assert loaded["ollama"] == old["ollama"]
+    assert loaded["tools"] == {"context_usage_limit": expected}
+    assert "tool_budget" not in loaded
+    assert json.loads(path.read_text(encoding="utf-8")) == old
+    saved = save_app_settings(tmp_path, loaded)
+    assert saved["tools"] == {"context_usage_limit": expected}
+    assert "tool_budget" not in json.loads(path.read_text(encoding="utf-8"))
+
+
+def test_new_tool_settings_take_precedence_over_legacy_settings(tmp_path):
+    value = {
+        "ui": {"language": "en"},
+        "ollama": {
+            "system_prompt": "",
+            "options": {"temperature": 0.8, "num_ctx": 8192},
+        },
+        "tools": {"context_usage_limit": 0.75},
+        "tool_budget": {"response_reserve_ratio": 0.4},
+    }
+    assert save_app_settings(tmp_path, value)["tools"] == {"context_usage_limit": 0.75}
 
 
 def test_model_metadata_failure_uses_request_capacity():
@@ -304,7 +351,7 @@ def test_large_context_continues_beyond_old_character_limit(monkeypatch):
             self.calls += 1
             if not kwargs["tools"]:
                 return [SimpleNamespace(message={"content": "partial answer"})]
-            assert self.calls < 30
+            assert self.calls < 50
             return [
                 SimpleNamespace(
                     message={
@@ -334,11 +381,12 @@ def test_large_context_continues_beyond_old_character_limit(monkeypatch):
     )
     results = [e["result"] for e in events if e["type"] == "tool_end"]
     assert sum(map(len, results)) > 24000
+    assert sum(ResultBudget(0).estimate(result) for result in results) > 131072 * 0.5
     assert len(executed) > 5
     final = events[-1]
     assert final["type"] == "done"
-    assert final["context_budget"]["tool_tokens"] <= 65536
-    assert final["context_budget"]["stop_reason"] == "tool_total_limit"
+    assert final["context_budget"]["tool_tokens"] <= int(131072 * 0.8)
+    assert final["context_budget"]["stop_reason"] == "context_headroom"
 
 
 def test_metadata_skip_does_not_block_a_smaller_call_in_same_batch(monkeypatch):
@@ -371,7 +419,7 @@ def test_metadata_skip_does_not_block_a_smaller_call_in_same_batch(monkeypatch):
                                     "function": {
                                         "name": "scrape_url",
                                         "arguments": {
-                                            "url": "https://example.com/long-document",
+                                            "url": "https://example.com/" + "long" * 500,
                                         },
                                     }
                                 },
@@ -393,7 +441,6 @@ def test_metadata_skip_does_not_block_a_smaller_call_in_same_batch(monkeypatch):
             registry=registry,
             options={"num_ctx": 8192},
             language="en",
-            budget_options={**DEFAULT_RATIOS, "per_result_ratio": 0.005},
         )
     )
     assert executed == [True]
@@ -457,8 +504,15 @@ def test_sdk_transport_preserves_cloud_alias_metadata_with_one_request():
 
     def respond(request):
         requests.append(request)
-        return httpx.Response(200, json={**metadata(), "remote_host": "https://example.com",
-                                         "remote_model": "remote", "capabilities": ["tools"]})
+        return httpx.Response(
+            200,
+            json={
+                **metadata(),
+                "remote_host": "https://example.com",
+                "remote_model": "remote",
+                "capabilities": ["tools"],
+            },
+        )
 
     client = ollama.Client(host="http://fixture", transport=httpx.MockTransport(respond))
     info = get_model_info("custom-alias", client=client)

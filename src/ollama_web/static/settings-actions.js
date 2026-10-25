@@ -3,11 +3,11 @@
   const $ = (id) => document.getElementById(id);
   const modal = $("settings-modal");
   const screens = [...document.querySelectorAll("[data-settings-screen]")];
-  const budgetInputs = [...document.querySelectorAll("[data-budget]")];
   const advanced = [...document.querySelectorAll("[data-option]")];
   const ctxValues = [4096, 8192, 16384, 32768, 65536, 131072, 262144];
   const ctxLabels = ["4k", "8k", "16k", "32k", "64k", "128k", "256k"];
   let screen = "general";
+  let loadedSettings = null;
 
   function cookie(name) {
     const found = document.cookie.split(";").map((v) => v.trim())
@@ -33,11 +33,13 @@
     $("settings-back-btn").hidden = name === "general";
     $("settings-modal-footer").hidden = name === "general";
     const key = name === "ui" ? "settings.ui.title"
-      : name === "ollama" ? "settings.ollama.title" : "settings.general.title";
+      : name === "ollama" ? "settings.ollama.title"
+      : name === "tools" ? "settings.tools.title" : "settings.general.title";
     $("settings-modal-title").textContent = t(key);
     status("");
   }
   function sliders() {
+    $("context-usage-limit-value").textContent = `${$("settings-context-usage-limit").value}%`;
     $("temperature-value").textContent = Number($("settings-temperature").value).toFixed(1);
     $("num-ctx-value").textContent = ctxLabels[Number($("settings-num-ctx").value)];
   }
@@ -48,10 +50,9 @@
     if (!fixed) $("settings-seed").value = "";
   }
   function populate(data) {
+    loadedSettings = structuredClone(data);
     const options = data.ollama.options;
-    budgetInputs.forEach((input) => {
-      input.value = String(data.tool_budget[input.dataset.budget] * 100);
-    });
+    $("settings-context-usage-limit").value = String(data.tools.context_usage_limit * 100);
     $("settings-language").value = data.ui.language;
     $("settings-system-prompt").value = data.ollama.system_prompt;
     $("settings-temperature").value = String(options.temperature);
@@ -76,6 +77,15 @@
     return integer ? Number.parseInt(raw, 10) : Number(raw);
   }
   function collect() {
+    const data = structuredClone(loadedSettings);
+    if (screen === "tools") {
+      data.tools = { context_usage_limit: Number($("settings-context-usage-limit").value) / 100 };
+      return data;
+    }
+    if (screen === "ui") {
+      data.ui.language = $("settings-language").value;
+      return data;
+    }
     const options = {
       temperature: Number($("settings-temperature").value),
       num_ctx: ctxValues[Number($("settings-num-ctx").value)],
@@ -96,28 +106,8 @@
     });
     const stop = $("settings-stop").value.split(/\r?\n/).filter((line) => line.length);
     if (stop.length) options.stop = stop;
-    const toolBudget = {};
-    budgetInputs.forEach((input) => {
-      input.setCustomValidity("");
-      const value = number(input, false);
-      if (value === null || value <= 0) {
-        input.setCustomValidity(t("budget.invalid"));
-        input.reportValidity();
-        throw new Error("budget");
-      }
-      toolBudget[input.dataset.budget] = value / 100;
-    });
-    if (toolBudget.per_result_ratio > toolBudget.total_ratio ||
-        toolBudget.total_ratio * 100 + toolBudget.response_reserve_ratio * 100 + toolBudget.safety_margin_ratio * 100 >= 100) {
-      budgetInputs[0].setCustomValidity(t("budget.invalid"));
-      budgetInputs[0].reportValidity();
-      throw new Error("budget");
-    }
-    return {
-      tool_budget: toolBudget,
-      ui: { language: $("settings-language").value },
-      ollama: { system_prompt: $("settings-system-prompt").value, options },
-    };
+    data.ollama = { system_prompt: $("settings-system-prompt").value, options };
+    return data;
   }
   async function open() {
     modal.classList.add("open");
@@ -151,6 +141,7 @@
         location.reload();
         return;
       }
+      populate(body);
       status(t("settings.messages.saved"));
     } catch (error) {
       status(t("settings.messages.save_failed").replace("{error}", error.message), true);
@@ -161,6 +152,8 @@
   $("settings-modal-close").addEventListener("click", close);
   $("settings-back-btn").addEventListener("click", () => show("general"));
   $("open-ui-settings").addEventListener("click", () => show("ui"));
+  $("open-tools-settings").addEventListener("click", () => show("tools"));
+  $("settings-context-usage-limit").addEventListener("input", sliders);
   $("open-ollama-settings").addEventListener("click", () => show("ollama"));
   $("settings-save-btn").addEventListener("click", save);
   $("settings-temperature").addEventListener("input", sliders);

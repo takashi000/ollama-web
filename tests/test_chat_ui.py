@@ -34,7 +34,7 @@ def login(page, app):
 
 
 @pytest.mark.parametrize(
-    "language,label", [("en", "Tool budget (estimated)"), ("ja", "ツール予算（推定）")]
+    "language,label", [("en", "Context usage (estimated)"), ("ja", "コンテキスト使用率（推定）")]
 )
 def test_dynamic_budget_settings_and_saved_display(tmp_path, browser_page, language, label):
     from playwright.sync_api import expect
@@ -47,20 +47,26 @@ def test_dynamic_budget_settings_and_saved_display(tmp_path, browser_page, langu
         login(page, app)
         page.locator("#general-settings-btn").click()
         page.locator("#open-ollama-settings").click()
-        total = page.locator('[data-budget="total_ratio"]')
-        per_result = page.locator('[data-budget="per_result_ratio"]')
-        expect(total).to_have_value("50")
-        total.fill("40")
-        per_result.fill("60")
-        page.locator("#settings-save-btn").click()
-        assert total.evaluate("el => el.validationMessage")
-        assert app.client.get("/api/settings").json()["tool_budget"]["total_ratio"] == 0.5
-        per_result.fill("4")
+        expect(page.locator('[data-settings-screen="ollama"] [data-budget]')).to_have_count(0)
+        expect(page.locator('[data-settings-screen="ollama"] input[type="range"]')).to_have_count(2)
+        page.locator("#settings-back-btn").click()
+        page.locator("#open-tools-settings").click()
+        limit = page.locator("#settings-context-usage-limit")
+        expect(limit).to_have_value("80")
+        expect(page.locator('[data-settings-screen="tools"] input')).to_have_count(1)
+        limit.fill("70")
+        limit.dispatch_event("input")
+        expect(page.locator("#context-usage-limit-value")).to_have_text("70%")
+        # Saving tools must ignore invalid, unsaved Ollama form values.
+        page.locator('[data-option="num_predict"]').evaluate("el => el.value = '1.5'")
         page.locator("#settings-save-btn").click()
         expect(page.locator("#settings-status")).to_contain_text(
             "保存しました" if language == "ja" else "Settings saved."
         )
-        assert app.client.get("/api/settings").json()["tool_budget"]["total_ratio"] == 0.4
+        saved = app.client.get("/api/settings").json()
+        assert saved["tools"] == {"context_usage_limit": 0.7}
+        assert saved["ollama"] == config["ollama"]
+        assert "tool_budget" not in saved
         page.locator("#settings-modal-close").click()
         page.locator("#input").fill("hello")
         page.locator("#send-btn").click()
@@ -69,7 +75,8 @@ def test_dynamic_budget_settings_and_saved_display(tmp_path, browser_page, langu
         expect(page.locator("#context-budget summary")).to_contain_text(label)
         page.locator("#context-budget summary").click()
         expect(page.locator("#budget-details")).to_contain_text("65,536")
-        expect(page.locator("#budget-details")).to_contain_text("40% / 4% / 20% / 10%")
+        expect(page.locator("#budget-details")).to_contain_text("70%")
+        expect(page.locator("#budget-details")).not_to_contain_text("20% / 10%")
         page.reload()
         page.locator("#session-list li").filter(has_text="hello").click()
         expect(page.locator("#context-budget")).to_be_visible()

@@ -1041,26 +1041,18 @@ function updateContextBudget(budget) {
   panel.hidden = !budget;
   if (!budget) return;
   const fmt = (n) => Number(n || 0).toLocaleString();
+  const limit = budget.input_limit ?? budget.effective_context -
+    (budget.response_reserve || 0) - (budget.safety_margin || 0);
+  const usageLimit = budget.context_usage_limit ?? limit / budget.effective_context;
   document.getElementById("budget-usage").textContent =
-    `${fmt(budget.tool_tokens)} / ${fmt(budget.tool_limit)} ${t("budget.unit")}`;
+    `${Math.round(budget.input_tokens / budget.effective_context * 100)}%`;
   const rows = [
-    [t("budget.used"), `${fmt(budget.tool_tokens)} / ${fmt(budget.tool_limit)}`],
-    [t("budget.input"), fmt(budget.input_tokens)],
-    [t("budget.capacity"), fmt(budget.effective_context)],
-    [t("budget.requested"), budget.requested_num_ctx ? fmt(budget.requested_num_ctx) : "—"],
-    [t("budget.next"), fmt(budget.next_result_tokens)],
-    [t("budget.reserve"), fmt(budget.response_reserve)],
-    [t("budget.safety"), fmt(budget.safety_margin)],
-    [t("budget.source"), t(`budget.sources.${budget.source}`)],
+    [t("budget.input"), `${fmt(budget.input_tokens)} ${t("budget.unit")}`],
+    [t("budget.limit"), `${Math.round(usageLimit * 100)}%`],
+    [t("budget.capacity"), `${fmt(budget.effective_context)} ${t("budget.unit")}`],
   ];
-  if (budget.ratios) {
-    rows.push([t("budget.ratios"), ["total_ratio", "per_result_ratio", "response_reserve_ratio", "safety_margin_ratio"]
-      .map((key) => `${Number((budget.ratios[key] * 100).toFixed(2))}%`).join(" / ")]);
-  }
   if (budget.stop_reason) rows.push([t("budget.reason"), t(`budget.reasons.${budget.stop_reason}`)]);
-  document.getElementById("budget-details").textContent =
-    rows.map(([key, value]) => `${key}: ${value}`).join("\n") + "\n" +
-    t(budget.capacity_estimated ? "budget.capacity_estimated" : "budget.capacity_reported");
+  document.getElementById("budget-details").textContent = rows.map(([key, value]) => `${key}: ${value}`).join("\n");
   updateTokenGauge(budget.input_tokens, budget.effective_context);
   const gauge = document.getElementById("token-gauge");
   if (gauge) gauge.title = t("budget.input");

@@ -19,7 +19,7 @@ from .context_budget import (
     ModelContext,
     ResultBudget,
     positive_int,
-    validate_ratios,
+    validate_tool_settings,
 )
 from .i18n import t
 from .mcp import redact_secrets
@@ -215,7 +215,7 @@ def stream_chat_with_tools(
     options: dict[str, Any] | None = None,
     language: str | None = None,
     model_info: dict[str, Any] | None = None,
-    budget_options: dict[str, float] | None = None,
+    tool_settings: dict[str, float] | None = None,
 ) -> Iterator[dict[str, Any]]:
     """Run a tool-calling chat loop and yield real streaming events from ollama.
 
@@ -251,8 +251,8 @@ def stream_chat_with_tools(
         ModelContext.resolve(model, metadata, options or {}),
         num_predict=positive_int((options or {}).get("num_predict")),
     )
-    if budget_options is not None:
-        budget.ratios = validate_ratios(budget_options)
+    if tool_settings is not None:
+        budget.context_usage_limit = validate_tool_settings(tool_settings)["context_usage_limit"]
     budget.notification_text = (
         get_prompt("tool_context_instruction", lang=language)
         + "\n\n"
@@ -523,6 +523,13 @@ def stream_chat_with_tools(
         # A metadata-only failure must not trigger an endless identical retry loop.
         if budget.stop_reason == "result_metadata_too_large":
             budget_exhausted = True
+        # Finish before another model round could consume the remaining room with
+        # a tool request and its matching skip response. The final instruction was reserved.
+        followup_reserve = max(notice_costs, default=0)
+        if msg is not None:
+            followup_reserve += budget.message_tokens(msg)
+        if budget.available(messages, effective_tools, followup_reserve).tokens <= 0:
+            budget_exhausted = True
 
     logger.info("tool execution stopped reason=%s", budget.stop_reason)
     yield {
@@ -597,7 +604,7 @@ async def astream_chat_with_tools(
     options: dict[str, Any] | None = None,
     language: str | None = None,
     model_info: dict[str, Any] | None = None,
-    budget_options: dict[str, float] | None = None,
+    tool_settings: dict[str, float] | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
     """Async wrapper that yields events from ``stream_chat_with_tools``."""
     import anyio
@@ -612,7 +619,7 @@ async def astream_chat_with_tools(
         options=options,
         language=language,
         model_info=model_info,
-        budget_options=budget_options,
+        tool_settings=tool_settings,
     )
 
     def _next() -> dict[str, Any] | None:

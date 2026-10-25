@@ -331,7 +331,7 @@ def test_more_than_five_tool_rounds(monkeypatch, kind):
 @pytest.mark.parametrize("capacity", [16384, 65536, 131072])
 def test_result_budget_is_shared_and_stops_rest_of_batch(monkeypatch, name, capacity):
     from ollama_web import llm
-    from ollama_web.context_budget import DEFAULT_RATIOS, ResultBudget
+    from ollama_web.context_budget import ResultBudget
 
     executed = []
     registry = ToolRegistry()
@@ -382,15 +382,15 @@ def test_result_budget_is_shared_and_stops_rest_of_batch(monkeypatch, name, capa
             capabilities={"tools"},
             language="en",
             options={"num_ctx": capacity},
-            budget_options={**DEFAULT_RATIOS, "total_ratio": 0.1},
+            tool_settings={"context_usage_limit": 0.2},
         )
     )
     executed_events = [e for e in events if e["type"] == "tool_end"]
-    assert 2 <= len(executed) < 6
+    assert 1 <= len(executed) <= 6
     assert len(executed_events) == len(executed)
     assert all(ResultBudget(int(capacity * 0.05)).fits(e["result"]) for e in executed_events)
-    assert events[-1]["context_budget"]["tool_tokens"] <= int(capacity * 0.1)
-    assert events[-1]["context_budget"]["stop_reason"] == "tool_total_limit"
+    assert events[-1]["context_budget"]["tool_tokens"] <= int(capacity * 0.2)
+    assert events[-1]["context_budget"]["stop_reason"] == "context_headroom"
     assert len(client.calls) == 2
 
 

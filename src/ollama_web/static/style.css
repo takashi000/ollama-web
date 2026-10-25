@@ -861,4 +861,3 @@ button#send-btn { padding: 0 20px; }
   border-radius: 6px; white-space: pre-wrap; width: min(420px, 85vw);
   color: var(--text); font-family: inherit;
 }
-.budget-settings { border: 1px solid var(--border); border-radius: 6px; margin: 12px 0; }

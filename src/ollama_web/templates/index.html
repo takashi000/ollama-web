@@ -119,6 +119,10 @@
               <strong>{{ t('settings.ui.title') }}</strong>
               <span>{{ t('settings.ui.description') }}</span>
             </button>
+            <button id="open-tools-settings" type="button" class="settings-menu-card">
+              <strong>{{ t('settings.tools.title') }}</strong>
+              <span>{{ t('settings.tools.description') }}</span>
+            </button>
             <button id="open-ollama-settings" type="button" class="settings-menu-card">
               <strong>{{ t('settings.ollama.title') }}</strong>
               <span>{{ t('settings.ollama.description') }}</span>
@@ -135,6 +139,14 @@
             </select>
           </label>
           <p class="field-help">{{ t('settings.ui.reload_notice') }}</p>
+        </section>
+
+        <section class="settings-screen" data-settings-screen="tools" hidden>
+          <label class="settings-field" for="settings-context-usage-limit">
+            <span>{{ t('settings.tools.context_usage_limit') }}: <output id="context-usage-limit-value">80%</output></span>
+            <input id="settings-context-usage-limit" type="range" min="1" max="99" step="1" value="80" />
+          </label>
+          <p class="field-help">{{ t('settings.tools.help') }}</p>
         </section>
 
         <section class="settings-screen" data-settings-screen="ollama" hidden>
@@ -169,17 +181,6 @@
                      aria-label="{{ t('settings.ollama.seed_value') }}" hidden />
             </div>
           </div>
-
-          <fieldset class="budget-settings">
-            <legend>{{ t('budget.title') }}</legend>
-            <p class="field-help">{{ t('budget.help') }}</p>
-            <div class="option-grid">
-              <label class="settings-field"><span>{{ t('budget.total_ratio') }}</span><input data-budget="total_ratio" type="number" min="0" max="100" step="any" required /></label>
-              <label class="settings-field"><span>{{ t('budget.per_result_ratio') }}</span><input data-budget="per_result_ratio" type="number" min="0" max="100" step="any" required /></label>
-              <label class="settings-field"><span>{{ t('budget.response_reserve_ratio') }}</span><input data-budget="response_reserve_ratio" type="number" min="0" max="100" step="any" required /></label>
-              <label class="settings-field"><span>{{ t('budget.safety_margin_ratio') }}</span><input data-budget="safety_margin_ratio" type="number" min="0" max="100" step="any" required /></label>
-            </div>
-          </fieldset>
 
           <details class="advanced-settings">
             <summary>{{ t('settings.ollama.advanced') }}</summary>

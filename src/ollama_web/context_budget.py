@@ -9,39 +9,23 @@ from contextvars import ContextVar
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
-DEFAULT_RATIOS = {
-    "total_ratio": 0.5,
-    "per_result_ratio": 0.05,
-    "response_reserve_ratio": 0.2,
-    "safety_margin_ratio": 0.1,
-}
+DEFAULT_TOOL_SETTINGS = {"context_usage_limit": 0.8}
 IMAGE_TOKENS = 4096
 MESSAGE_TOKENS = 32
 
 
-def validate_ratios(raw: Any) -> dict[str, float]:
-    if not isinstance(raw, dict) or set(raw) != set(DEFAULT_RATIOS):
-        raise ValueError("tool_budget must contain all four ratio fields")
-    result: dict[str, float] = {}
-    for key, value in raw.items():
-        if (
-            isinstance(value, bool)
-            or not isinstance(value, (int, float))
-            or not math.isfinite(value)
-            or value <= 0
-        ):
-            raise ValueError(f"tool_budget.{key} must be a finite positive number")
-        result[key] = float(value)
-    if result["per_result_ratio"] > result["total_ratio"]:
-        raise ValueError("tool_budget.per_result_ratio must not exceed total_ratio")
+def validate_tool_settings(raw: Any) -> dict[str, float]:
+    if not isinstance(raw, dict) or set(raw) != set(DEFAULT_TOOL_SETTINGS):
+        raise ValueError("tools must contain context_usage_limit")
+    value = raw["context_usage_limit"]
     if (
-        math.fsum(
-            result[k] for k in ("total_ratio", "response_reserve_ratio", "safety_margin_ratio")
-        )
-        >= 1
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not math.isfinite(value)
+        or not 0 < value < 1
     ):
-        raise ValueError("tool_budget total, response reserve and safety margin must sum to < 1")
-    return result
+        raise ValueError("tools.context_usage_limit must be between 0 and 1 (exclusive)")
+    return {"context_usage_limit": float(value)}
 
 
 def positive_int(value: Any) -> int | None:
@@ -148,7 +132,7 @@ def _serialized(value: Any) -> str:
 @dataclass
 class ContextBudget:
     context: ModelContext
-    ratios: dict[str, float] = field(default_factory=lambda: dict(DEFAULT_RATIOS))
+    context_usage_limit: float = DEFAULT_TOOL_SETTINGS["context_usage_limit"]
     num_predict: int | None = None
     factor: float = 1.0
     results: list[str] = field(default_factory=list)
@@ -190,8 +174,11 @@ class ContextBudget:
         self.observed_tail = 0
 
     @property
-    def total_limit(self) -> int:
-        return math.floor(self.context.capacity * self.ratios["total_ratio"])
+    def input_limit(self) -> int:
+        return min(
+            math.floor(self.context.capacity * self.context_usage_limit),
+            self.context.capacity - (self.num_predict or 0),
+        )
 
     @property
     def used(self) -> int:
@@ -201,38 +188,21 @@ class ContextBudget:
 
     @property
     def reserve(self) -> int:
-        return max(
-            math.ceil(self.context.capacity * self.ratios["response_reserve_ratio"]),
-            self.num_predict or 0,
-        )
-
-    @property
-    def safety(self) -> int:
-        return math.ceil(self.context.capacity * self.ratios["safety_margin_ratio"])
+        return self.context.capacity - self.input_limit
 
     def headroom(self, messages: Sequence[Any], tools: Sequence[Any]) -> int:
-        return (
-            self.context.capacity - self.input_tokens(messages, tools) - self.reserve - self.safety
-        )
+        return self.input_limit - self.input_tokens(messages, tools)
 
     def available(
         self, messages: Sequence[Any], tools: Sequence[Any], notice_reserve: int = 0
     ) -> ResultBudget:
-        total = self.total_limit - self.used
         notification_reserve = self.text_tokens(self.notification_text) + MESSAGE_TOKENS
         headroom = self.headroom(messages, tools) - notice_reserve - notification_reserve
-        tokens = max(
-            0,
-            min(
-                math.floor(self.context.capacity * self.ratios["per_result_ratio"]), total, headroom
-            ),
-        )
-        if total <= 0:
-            self.stop_reason = "tool_total_limit"
-        elif headroom <= 0:
+        # Size individual pages automatically so one source cannot fill the context at once.
+        page_size = max(1, self.context.capacity // 20)
+        tokens = max(0, min(page_size, headroom))
+        if headroom <= 0:
             self.stop_reason = "context_headroom"
-        elif tokens <= 0:
-            self.stop_reason = "result_metadata_too_large"
         return ResultBudget(tokens, self.factor)
 
     def add_result(self, message: Any) -> None:
@@ -249,13 +219,13 @@ class ContextBudget:
             "requested_num_ctx": self.context.requested,
             "input_tokens": self.input_tokens(messages, tools),
             "tool_tokens": self.used,
-            "tool_limit": self.total_limit,
+            "tool_limit": self.input_limit,
+            "input_limit": self.input_limit,
+            "context_usage_limit": self.context_usage_limit,
             "next_result_tokens": self.available(messages, tools).tokens,
             "response_reserve": self.reserve,
-            "safety_margin": self.safety,
             "correction_factor": self.factor,
             "stop_reason": self.stop_reason,
-            "ratios": dict(self.ratios),
         }
 
     def update_runtime(self, response: Any, model: str) -> None:

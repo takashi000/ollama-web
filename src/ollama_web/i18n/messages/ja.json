@@ -77,7 +77,7 @@
     "done": "完了",
     "connecting": "接続中...",
     "disconnected": "切断しました",
-    "tool_context_exhausted": "ツール結果の容量上限に達しました。取得済み情報を整理中…",
+    "tool_context_exhausted": "回答用の容量を残して情報の取得を終了し、取得済みの資料から回答を作成します。",
     "pagination_incomplete": "資料に未取得部分があります。取得済み範囲のみで回答します。",
     "thinking": "思考プロセス",
     "executing_tool": "{label} を実行中…",
@@ -141,39 +141,25 @@
       "saved": "設定を保存しました。",
       "invalid_integer": "整数を入力してください。",
       "invalid_number": "数値を入力してください。"
+    },
+    "tools": {
+      "title": "ツール設定",
+      "description": "検索や資料の取得に使う容量を調整します。",
+      "context_usage_limit": "コンテキスト使用率の上限",
+      "help": "会話と取得した資料に使う容量の上限です。80%なら、残り20%を回答のために残します。1回の取得量は自動で調整します。"
     }
   },
   "budget": {
-    "title": "ツール予算（推定）",
-    "used": "使用量 / 累積上限",
-    "input": "入力全体（推定）",
-    "capacity": "実効コンテキスト",
-    "requested": "要求コンテキスト",
-    "next": "次の結果に使える量",
-    "reserve": "回答・思考用予約",
-    "safety": "安全余白",
-    "source": "容量の取得元",
-    "ratios": "累積 / 1回 / 回答予約 / 安全余白",
-    "reason": "停止理由",
+    "title": "コンテキスト使用率（推定）",
+    "input": "使用中",
+    "limit": "使用率の上限",
+    "capacity": "モデルの容量",
+    "reason": "取得を終了した理由",
     "unit": "トークン",
-    "sources": {
-      "model": "モデル情報",
-      "requested": "要求設定",
-      "runtime": "実行時割り当て",
-      "fallback": "代替値"
-    },
     "reasons": {
-      "tool_total_limit": "ツール結果の累積上限",
-      "context_headroom": "コンテキストの空き容量不足",
-      "result_metadata_too_large": "ページ継続情報の容量不足"
-    },
-    "capacity_estimated": "容量は推定値です",
-    "capacity_reported": "取得した容量を使用しています",
-    "help": "実効コンテキスト長に対する割合です。使用量は推定し、Ollamaの実測で補正します。",
-    "total_ratio": "ツール結果の累積予算 (%)",
-    "per_result_ratio": "1回の結果予算 (%)",
-    "response_reserve_ratio": "回答・思考用予約 (%)",
-    "safety_margin_ratio": "安全余白 (%)",
-    "invalid": "各割合は正数、1回は累積以下、累積＋回答予約＋安全余白は100%未満にしてください。"
+      "context_headroom": "回答用の容量を残して、情報の取得を終了しました。",
+      "result_metadata_too_large": "資料の続きの情報を収める容量がありません。",
+      "tool_total_limit": "情報の取得量が以前の設定の上限に達しました。"
+    }
   }
 }

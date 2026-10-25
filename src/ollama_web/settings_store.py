@@ -9,7 +9,7 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
-from .context_budget import DEFAULT_RATIOS, validate_ratios
+from .context_budget import DEFAULT_TOOL_SETTINGS, validate_tool_settings
 
 NUM_CTX_VALUES = (4096, 8192, 16384, 32768, 65536, 131072, 262144)
 INTEGER_OPTIONS = {
@@ -49,7 +49,7 @@ def default_app_settings(language: str = "ja") -> dict[str, Any]:
         language = "ja"
     return {
         "ui": {"language": language},
-        "tool_budget": dict(DEFAULT_RATIOS),
+        "tools": dict(DEFAULT_TOOL_SETTINGS),
         "ollama": {
             "system_prompt": "",
             "options": {"temperature": 0.8, "num_ctx": 8192},
@@ -105,7 +105,7 @@ def validate_app_settings(raw: Any) -> dict[str, Any]:
     """Validate and normalize the settings API payload."""
     if not isinstance(raw, dict):
         raise SettingsValidationError("Settings must be an object")
-    _require_keys(raw, {"ui", "ollama", "tool_budget"}, "settings")
+    _require_keys(raw, {"ui", "ollama", "tools", "tool_budget"}, "settings")
     if not {"ui", "ollama"} <= set(raw):
         raise SettingsValidationError("Settings must contain ui and ollama")
 
@@ -129,14 +129,27 @@ def validate_app_settings(raw: Any) -> dict[str, Any]:
     if len(system_prompt) > 20_000:
         raise SettingsValidationError("ollama.system_prompt is too long")
 
+    tools = raw.get("tools")
+    if tools is None and "tools" not in raw:
+        tools = dict(DEFAULT_TOOL_SETTINGS)
+        # Migrate the old response reserve into the single context-use ceiling.
+        legacy = raw.get("tool_budget")
+        reserve = legacy.get("response_reserve_ratio") if isinstance(legacy, dict) else None
+        if (
+            isinstance(reserve, (int, float))
+            and not isinstance(reserve, bool)
+            and math.isfinite(reserve)
+            and 0 < reserve < 1
+        ):
+            tools["context_usage_limit"] = 1 - reserve
     try:
-        ratios = validate_ratios(raw.get("tool_budget", dict(DEFAULT_RATIOS)))
+        tools = validate_tool_settings(tools)
     except ValueError as exc:
         raise SettingsValidationError(str(exc)) from exc
 
     return {
         "ui": {"language": language},
-        "tool_budget": ratios,
+        "tools": tools,
         "ollama": {
             "system_prompt": system_prompt,
             "options": _validate_options(ollama["options"]),
