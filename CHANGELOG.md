@@ -7,6 +7,13 @@
 
 ## [Unreleased]
 
+## [0.5.6] - 2026-10-26
+
+### Fixed
+
+- CIのUIテスト前に一時フォルダーの親ディレクトリを作成し、新規チェックアウトでの `FileNotFoundError` を修正しました。
+- 通常pipによるwheelインストール検証を非UIテストに限定し、Chromium未準備による失敗を修正しました。UIテストは専用のChromium検証ステップで実行します。
+
 ## [0.5.5] - 2026-10-26
 
 ### Changed
@@ -219,7 +226,8 @@
 
 - Web UIのセキュリティヘッダーと表示処理を強化しました。
 
-[Unreleased]: https://github.com/takashi000/ollama-web/compare/v0.5.5...HEAD
+[Unreleased]: https://github.com/takashi000/ollama-web/compare/v0.5.6...HEAD
+[0.5.6]: https://github.com/takashi000/ollama-web/compare/v0.5.5...v0.5.6
 [0.5.5]: https://github.com/takashi000/ollama-web/compare/v0.5.4...v0.5.5
 [0.5.4]: https://github.com/takashi000/ollama-web/compare/v0.5.3...v0.5.4
 [0.5.3]: https://github.com/takashi000/ollama-web/compare/v0.5.2...v0.5.3
