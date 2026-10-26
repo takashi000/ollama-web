@@ -46,7 +46,9 @@ jobs:
         run: uv run --locked playwright install --with-deps chromium
       - name: Test chat Stop button in Chromium
         if: matrix.python == '3.14'
-        run: uv run --locked pytest -q -m ui --basetemp .cache/ui-tests
+        run: |
+          uv run --locked python -c "from pathlib import Path; Path('.cache').mkdir(exist_ok=True)"
+          uv run --locked pytest -q -m ui --basetemp .cache/ui-tests
       - name: Upload UI diagnostics
         if: failure() && matrix.python == '3.14'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

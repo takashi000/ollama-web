@@ -84,7 +84,8 @@ def main() -> None:
             "assert all(Version(version(p)) >= Version(v) for p, v in floors.items()); "
             "print({p: version(p) for p in floors})",
         )
-        run("-m", "pytest", "tests", "-q", "-o", "pythonpath=")
+        # Browser tests run separately against the locked installation in CI.
+        run("-m", "pytest", "tests", "-q", "-m", "not ui", "-o", "pythonpath=")
 
 
 if __name__ == "__main__":
