@@ -18,7 +18,7 @@
     "model_label": "Model:",
     "token_count": "Token count",
     "attach_file": "Attach file",
-    "input_placeholder": "Type a message… (Enter to send / Shift+Enter for newline)",
+    "input_placeholder": "Type a message… (Enter for newline / Send button to send)",
     "no_sessions": "No sessions",
     "delete_session": "Delete session",
     "create_failed": "Failed to create session",

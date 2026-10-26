@@ -1,4 +1,4 @@
-"""Playwright exercises the existing Stop button against the real HTTP app."""
+"""Playwright exercises chat interactions against the real HTTP app."""
 
 import os
 import re
@@ -31,6 +31,68 @@ def login(page, app):
     page.locator("#pin-input").fill("123456")
     page.locator("#login-form button").click()
     page.locator("#model-select option").first.wait_for(state="attached")
+
+
+@pytest.mark.parametrize("language", ["ja", "en"])
+def test_enter_inserts_newlines_and_button_sends(tmp_path, browser_page, language):
+    from playwright.sync_api import expect
+
+    page = browser_page
+    with running_app(tmp_path / "app", mode="normal") as app:
+        config = app.client.get("/api/settings").json()
+        config["ui"]["language"] = language
+        assert app.client.put("/api/settings", headers=app.headers, json=config).is_success
+        login(page, app)
+        chat_requests = []
+        page.on("request", lambda request: chat_requests.append(request)
+                if request.url.endswith("/api/chat") else None)
+        input_box = page.locator("#input")
+        expect(input_box).to_have_attribute(
+            "placeholder",
+            "メッセージを入力… (Enter で改行 / 送信ボタンで送信)"
+            if language == "ja"
+            else "Type a message… (Enter for newline / Send button to send)",
+        )
+        # Cross the responsive boundary in both directions without reloading.
+        for width in [320, 390, 520, 768, 769, 1280, 390]:
+            page.set_viewport_size({"width": width, "height": 800})
+            input_box.fill("first")
+            input_box.press("End")
+            input_box.press("Enter")
+            input_box.press("Shift+Enter")
+            input_box.press("a")
+            expect(input_box).to_have_value("first\n\na")
+            expect(page.locator(".message.user")).to_have_count(0)
+            assert not chat_requests
+            input_bounds = input_box.bounding_box()
+            for selector in [".attach-btn", "#send-btn", "#cancel-btn"]:
+                bounds = page.locator(selector).bounding_box()
+                assert bounds["y"] == pytest.approx(input_bounds["y"], abs=1)
+                assert bounds["height"] == pytest.approx(input_bounds["height"], abs=1)
+                assert bounds["x"] >= 0
+                assert bounds["x"] + bounds["width"] <= width
+            assert input_bounds["width"] > 0
+            assert input_bounds["x"] >= 0
+            assert input_bounds["x"] + input_bounds["width"] <= width
+            if width <= 768:
+                assert input_bounds["height"] == 56
+                assert input_box.evaluate(
+                    """el => {
+                        const style = getComputedStyle(el);
+                        const contentHeight = el.clientHeight
+                            - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom);
+                        return contentHeight >= parseFloat(style.lineHeight) * 2;
+                    }"""
+                )
+        page.locator("#send-btn").click()
+        expect(page.locator(".message.assistant .body")).to_have_text("done")
+        expect(input_box).to_have_value("")
+        assert len(chat_requests) == 1
+        sessions = app.client.get("/api/sessions").json()["sessions"]
+        session = app.client.get(f"/api/sessions/{sessions[0]['id']}").json()
+        assert [m["content"] for m in session["messages"] if m["role"] == "user"] == [
+            "first\n\na",
+        ]
 
 
 @pytest.mark.parametrize("language", ["ja", "en"])

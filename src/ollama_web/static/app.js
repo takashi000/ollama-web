@@ -987,13 +987,6 @@ formEl.addEventListener("submit", (e) => {
   send();
 });
 
-inputEl.addEventListener("keydown", (e) => {
-  if (e.key === "Enter" && !e.shiftKey) {
-    e.preventDefault();
-    send();
-  }
-});
-
 async function clearMessages() {
   if (!currentSessionId) {
     chatEl.innerHTML = "";

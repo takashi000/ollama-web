@@ -18,7 +18,7 @@
     "model_label": "モデル:",
     "token_count": "トークン数",
     "attach_file": "ファイルを添付",
-    "input_placeholder": "メッセージを入力… (Enter で送信 / Shift+Enter で改行)",
+    "input_placeholder": "メッセージを入力… (Enter で改行 / 送信ボタンで送信)",
     "no_sessions": "セッションがありません",
     "delete_session": "セッションを削除",
     "create_failed": "セッションの作成に失敗しました",
