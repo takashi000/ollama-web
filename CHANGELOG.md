@@ -7,16 +7,23 @@
 
 ## [Unreleased]
 
+## [0.5.5] - 2026-10-26
+
 ### Changed
 
 - Pythonの最低要件を3.14へ引き上げ、Windows/Linux × CPython 3.14・3.15をCI対象にしました。3.13以前の仮想環境は再作成が必要です。
 - Python 3.15用wheelのためcffi・librt・lxml・MarkupSafe・Pydantic/coreと必要なtyping-inspectionを更新しました。保存データ・HTTP APIの形式は変更していません。
 - ddgs の最低バージョンとロックファイルを 9.16.0 へ更新しました。検索バックエンドは引き続き auto を使用します。
 - Web検索の地域をクエリから内部選択し、`OLLAMA_WEB_SEARCH_REGION` で auto・米国・日本を切り替えられるようにしました。LLM向け引数は変更していません。
+- ツール結果の固定文字数制限と固定ラウンド上限を撤去し、モデル別の動的コンテキスト予算で取得量を制御するようにしました。
+- 一般設定に独立したツール設定を設け、「ツール取得の停止ライン」（初期値80%）へ設定を統一しました。停止ラインは追加のツール取得だけに適用し、通常回答と最終回答は継続します。
+- 入力使用率と停止ラインの表示を円形ゲージへ統合しました。
+- Enterキーを標準の改行操作に統一し、送信は送信ボタンで行うようにしました。モバイルの入力欄とボタンの高さも揃えました。
 
 ### Fixed
 
 - Web検索の空・URL形式タイトルを欠損として扱い、無効URLとYahoo包装解除後の既知Bing広告リンクを除外するようにしました。検索失敗は引き続きツールエラーとして伝えます。
+- 停止ボタンや接続切断時にリクエスト専用ワーカーと所有するstdio子プロセスを終了し、停止後の結果・添付が反映されないようにしました。
 
 ### Security
 
@@ -212,7 +219,8 @@
 
 - Web UIのセキュリティヘッダーと表示処理を強化しました。
 
-[Unreleased]: https://github.com/takashi000/ollama-web/compare/v0.5.4...HEAD
+[Unreleased]: https://github.com/takashi000/ollama-web/compare/v0.5.5...HEAD
+[0.5.5]: https://github.com/takashi000/ollama-web/compare/v0.5.4...v0.5.5
 [0.5.4]: https://github.com/takashi000/ollama-web/compare/v0.5.3...v0.5.4
 [0.5.3]: https://github.com/takashi000/ollama-web/compare/v0.5.2...v0.5.3
 [0.5.2]: https://github.com/takashi000/ollama-web/compare/v0.5.1...v0.5.2
